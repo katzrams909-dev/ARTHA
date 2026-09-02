@@ -1,0 +1,1300 @@
+//@version=6
+indicator(
+     "Institutional Engine — Prototype 01",
+     shorttitle = "IE P01",
+     overlay = true,
+     max_labels_count = 500,
+     max_lines_count = 500
+)
+
+//=============================================================================
+// INPUTS
+//=============================================================================
+
+//-----------------------------------------------------------------------------
+// Structure
+//-----------------------------------------------------------------------------
+groupStructure = "01 — Market Structure"
+
+internalStrength = input.int(
+     2,
+     "Internal Pivot Strength",
+     minval = 1,
+     group = groupStructure
+)
+
+externalStrength = input.int(
+     5,
+     "External Pivot Strength",
+     minval = 2,
+     group = groupStructure
+)
+
+showInternalStructure = input.bool(
+     true,
+     "Show Internal Structure",
+     group = groupStructure
+)
+
+showExternalStructure = input.bool(
+     true,
+     "Show External Structure",
+     group = groupStructure
+)
+
+showStructureLabels = input.bool(
+     true,
+     "Show Structure Labels",
+     group = groupStructure
+)
+
+//-----------------------------------------------------------------------------
+// Liquidity
+//-----------------------------------------------------------------------------
+groupLiquidity = "02 — Liquidity"
+
+showLiquidity = input.bool(
+     true,
+     "Show Liquidity",
+     group = groupLiquidity
+)
+
+showSweeps = input.bool(
+     true,
+     "Show Liquidity Sweeps",
+     group = groupLiquidity
+)
+
+eqToleranceATR = input.float(
+     0.10,
+     "EQH/EQL Tolerance (ATR)",
+     minval = 0.01,
+     step = 0.01,
+     group = groupLiquidity
+)
+
+maxLiquidityObjects = input.int(
+     50,
+     "Maximum Active Liquidity Objects",
+     minval = 10,
+     maxval = 100,
+     group = groupLiquidity
+)
+
+//-----------------------------------------------------------------------------
+// Setup State
+//-----------------------------------------------------------------------------
+groupSetup = "03 — Setup Engine"
+
+setupLifetime = input.int(
+     20,
+     "Setup Lifetime (bars)",
+     minval = 1,
+     group = groupSetup
+)
+
+//-----------------------------------------------------------------------------
+// Reference Levels
+//-----------------------------------------------------------------------------
+groupReference = "04 — Reference Liquidity"
+
+showPreviousDay = input.bool(
+     true,
+     "Previous Day High/Low",
+     group = groupReference
+)
+
+showPreviousWeek = input.bool(
+     true,
+     "Previous Week High/Low",
+     group = groupReference
+)
+
+showPreviousMonth = input.bool(
+     true,
+     "Previous Month High/Low",
+     group = groupReference
+)
+
+//-----------------------------------------------------------------------------
+// Diagnostics
+//-----------------------------------------------------------------------------
+groupDiagnostic = "05 — Diagnostics"
+
+diagnosticMode = input.bool(
+     false,
+     "Diagnostic Mode",
+     group = groupDiagnostic
+)
+
+showEventLog = input.bool(
+     true,
+     "Show Event Log",
+     group = groupDiagnostic
+)
+
+showStateMachine = input.bool(
+     true,
+     "Show State Machine",
+     group = groupDiagnostic
+)
+
+showPivotAudit = input.bool(
+     true,
+     "Show Pivot Confirmation Audit",
+     group = groupDiagnostic
+)
+
+showRejectionReason = input.bool(
+     true,
+     "Show Rejection Reason",
+     group = groupDiagnostic
+)
+
+eventHistorySize = input.int(
+     8,
+     "Event History Size",
+     minval = 3,
+     maxval = 15,
+     group = groupDiagnostic
+)
+
+//=============================================================================
+// TYPES
+//=============================================================================
+
+//-----------------------------------------------------------------------------
+// Pivot object
+//-----------------------------------------------------------------------------
+type Swing
+    int    pivotBar
+    int    confirmationBar
+    float  price
+    bool   isHigh
+    bool   isInternal
+    bool   confirmed
+    string classification
+
+//-----------------------------------------------------------------------------
+// Liquidity object
+//-----------------------------------------------------------------------------
+type LiquidityPool
+    int    id
+    float  price
+    bool   isBuySide
+    bool   active
+    bool   swept
+    bool   invalidated
+    int    createdBar
+    int    sweptBar
+    string source
+    string state
+
+//-----------------------------------------------------------------------------
+// Liquidity event
+//-----------------------------------------------------------------------------
+type LiquidityEvent
+    int    id
+    int    bar
+    float  price
+    bool   isBuySide
+    string source
+    string eventType
+
+//-----------------------------------------------------------------------------
+// Setup object
+//-----------------------------------------------------------------------------
+type Setup
+    int    id
+    bool   active
+    bool   isLong
+    int    createdBar
+    int    expiryBar
+    string state
+    int    liquidityEventId
+    string rejectionReason
+
+//=============================================================================
+// GLOBAL STATE
+//=============================================================================
+
+//-----------------------------------------------------------------------------
+// Structure state
+//-----------------------------------------------------------------------------
+
+var float internalHigh = na
+var float internalLow  = na
+
+var float externalHigh = na
+var float externalLow  = na
+
+var int internalHighBar = na
+var int internalLowBar  = na
+
+var int externalHighBar = na
+var int externalLowBar = na
+
+var float protectedHigh = na
+var float protectedLow = na
+
+var int protectedHighBar = na
+var int protectedLowBar = na
+
+var string internalBias = "NEUTRAL"
+var string externalBias = "NEUTRAL"
+
+var string lastStructureEvent = "NONE"
+
+//-----------------------------------------------------------------------------
+// Object storage
+//-----------------------------------------------------------------------------
+
+var array<Swing> swings = array.new<Swing>()
+var array<LiquidityPool> liquidityPools = array.new<LiquidityPool>()
+var array<LiquidityEvent> liquidityEvents = array.new<LiquidityEvent>()
+var array<Setup> setups = array.new<Setup>()
+
+//-----------------------------------------------------------------------------
+// IDs
+//-----------------------------------------------------------------------------
+
+var int nextLiquidityId = 1
+var int nextEventId = 1
+var int nextSetupId = 1
+
+//-----------------------------------------------------------------------------
+// Diagnostics
+//-----------------------------------------------------------------------------
+
+var array<string> eventLog = array.new_string()
+
+var string currentDiagnosticState = "IDLE"
+var string currentRejectionReason = "NONE"
+
+//=============================================================================
+// UTILITY FUNCTIONS
+//=============================================================================
+
+//-----------------------------------------------------------------------------
+// Add diagnostic event
+//-----------------------------------------------------------------------------
+addEvent(string message) =>
+    array.unshift(eventLog, message)
+
+    if array.size(eventLog) > eventHistorySize
+        array.pop(eventLog)
+
+//-----------------------------------------------------------------------------
+// Get ATR
+//-----------------------------------------------------------------------------
+atrValue = ta.atr(14)
+
+//-----------------------------------------------------------------------------
+// Price tolerance
+//-----------------------------------------------------------------------------
+liquidityTolerance = atrValue * eqToleranceATR
+
+//-----------------------------------------------------------------------------
+// Check approximate price equality
+//-----------------------------------------------------------------------------
+pricesEqual(float a, float b, float tolerance) =>
+    not na(a) and not na(b) and math.abs(a - b) <= tolerance
+
+//-----------------------------------------------------------------------------
+// Setup state name
+//-----------------------------------------------------------------------------
+setupStateName(int state) =>
+    switch state
+        0 => "IDLE"
+        1 => "WAIT_DISPLACEMENT"
+        2 => "WAIT_MSS"
+        3 => "WAIT_POI"
+        4 => "WAIT_RETEST"
+        5 => "READY"
+        6 => "TRIGGERED"
+        7 => "INVALIDATED"
+        8 => "EXPIRED"
+        => "UNKNOWN"
+
+//-----------------------------------------------------------------------------
+// Add liquidity pool
+//-----------------------------------------------------------------------------
+addLiquidity(
+     float price,
+     bool isBuySide,
+     string source,
+     int createdBar) =>
+
+    bool duplicate = false
+
+    if array.size(liquidityPools) > 0
+        for i = 0 to array.size(liquidityPools) - 1
+            pool = array.get(liquidityPools, i)
+
+            if pool.active and
+               pool.isBuySide == isBuySide and
+               pricesEqual(pool.price, price, liquidityTolerance)
+
+                duplicate := true
+                break
+
+    if not duplicate
+        pool = LiquidityPool.new(
+             nextLiquidityId,
+             price,
+             isBuySide,
+             true,
+             false,
+             false,
+             createdBar,
+             na,
+             source,
+             "ACTIVE"
+        )
+
+        array.push(liquidityPools, pool)
+
+        addEvent(
+             "LQ #" +
+             str.tostring(nextLiquidityId) +
+             " " +
+             (isBuySide ? "BSL" : "SSL") +
+             " identified"
+        )
+
+        nextLiquidityId += 1
+
+//-----------------------------------------------------------------------------
+// Create liquidity event
+//-----------------------------------------------------------------------------
+createLiquidityEvent(
+     float price,
+     bool isBuySide,
+     string source,
+     string eventType) =>
+
+    event = LiquidityEvent.new(
+         nextEventId,
+         bar_index,
+         price,
+         isBuySide,
+         source,
+         eventType
+    )
+
+    array.push(liquidityEvents, event)
+
+    addEvent(
+         "LQ #" +
+         str.tostring(nextEventId) +
+         " " +
+         eventType +
+         " " +
+         source
+    )
+
+    nextEventId += 1
+
+//-----------------------------------------------------------------------------
+// Create setup
+//-----------------------------------------------------------------------------
+createSetup(
+     bool isLong,
+     int liquidityEventId) =>
+
+    setup = Setup.new(
+         nextSetupId,
+         true,
+         isLong,
+         bar_index,
+         bar_index + setupLifetime,
+         isLong ? "WAIT_DISPLACEMENT" : "WAIT_DISPLACEMENT",
+         liquidityEventId,
+         "NONE"
+    )
+
+    array.push(setups, setup)
+
+    currentDiagnosticState := setup.state
+
+    addEvent(
+         "SETUP #" +
+         str.tostring(nextSetupId) +
+         " " +
+         (isLong ? "LONG" : "SHORT") +
+         " created"
+    )
+
+    nextSetupId += 1
+
+//=============================================================================
+// CONFIRMED PIVOTS
+//=============================================================================
+
+// IMPORTANT:
+// ta.pivot* returns a pivot only after the required right-side bars have
+// completed. Therefore the pivot is not available to the engine until the
+// confirmation bar.
+
+//-----------------------------------------------------------------------------
+// Internal pivots
+//-----------------------------------------------------------------------------
+
+internalPivotHigh =
+     ta.pivothigh(
+         high,
+         internalStrength,
+         internalStrength
+     )
+
+internalPivotLow =
+     ta.pivotlow(
+         low,
+         internalStrength,
+         internalStrength
+     )
+
+//-----------------------------------------------------------------------------
+// External pivots
+//-----------------------------------------------------------------------------
+
+externalPivotHigh =
+     ta.pivothigh(
+         high,
+         externalStrength,
+         externalStrength
+     )
+
+externalPivotLow =
+     ta.pivotlow(
+         low,
+         externalStrength,
+         externalStrength
+     )
+
+//=============================================================================
+// INTERNAL STRUCTURE
+//=============================================================================
+
+if not na(internalPivotHigh)
+
+    pivotBar = bar_index - internalStrength
+
+    string classification = "HIGH"
+
+    if not na(internalHigh)
+
+        if internalPivotHigh > internalHigh
+            classification := "HH"
+        else
+            classification := "LH"
+
+    swing = Swing.new(
+         pivotBar,
+         bar_index,
+         internalPivotHigh,
+         true,
+         true,
+         true,
+         classification
+    )
+
+    array.push(swings, swing)
+
+    internalHigh := internalPivotHigh
+    internalHighBar := pivotBar
+
+    // Liquidity above price = buy-side liquidity
+    addLiquidity(
+         internalPivotHigh,
+         true,
+         "INTERNAL_" + classification,
+         pivotBar
+    )
+
+if not na(internalPivotLow)
+
+    pivotBar = bar_index - internalStrength
+
+    string classification = "LOW"
+
+    if not na(internalLow)
+
+        if internalPivotLow > internalLow
+            classification := "HL"
+        else
+            classification := "LL"
+
+    swing = Swing.new(
+         pivotBar,
+         bar_index,
+         internalPivotLow,
+         false,
+         true,
+         true,
+         classification
+    )
+
+    array.push(swings, swing)
+
+    internalLow := internalPivotLow
+    internalLowBar := pivotBar
+
+    // Liquidity below price = sell-side liquidity
+    addLiquidity(
+         internalPivotLow,
+         false,
+         "INTERNAL_" + classification,
+         pivotBar
+    )
+
+//=============================================================================
+// EXTERNAL STRUCTURE
+//=============================================================================
+
+if not na(externalPivotHigh)
+
+    pivotBar = bar_index - externalStrength
+
+    string classification = "HIGH"
+
+    if not na(externalHigh)
+
+        if externalPivotHigh > externalHigh
+            classification := "HH"
+        else
+            classification := "LH"
+
+    swing = Swing.new(
+         pivotBar,
+         bar_index,
+         externalPivotHigh,
+         true,
+         false,
+         true,
+         classification
+    )
+
+    array.push(swings, swing)
+
+    externalHigh := externalPivotHigh
+    externalHighBar := pivotBar
+
+    addLiquidity(
+         externalPivotHigh,
+         true,
+         "EXTERNAL_" + classification,
+         pivotBar
+    )
+
+if not na(externalPivotLow)
+
+    pivotBar = bar_index - externalStrength
+
+    string classification = "LOW"
+
+    if not na(externalLow)
+
+        if externalPivotLow > externalLow
+            classification := "HL"
+        else
+            classification := "LL"
+
+    swing = Swing.new(
+         pivotBar,
+         bar_index,
+         externalPivotLow,
+         false,
+         false,
+         true,
+         classification
+    )
+
+    array.push(swings, swing)
+
+    externalLow := externalPivotLow
+    externalLowBar := pivotBar
+
+    addLiquidity(
+         externalPivotLow,
+         false,
+         "EXTERNAL_" + classification,
+         pivotBar
+    )
+
+//=============================================================================
+// STRUCTURE BREAKS
+//=============================================================================
+
+// Internal bullish break
+internalBullBreak =
+     barstate.isconfirmed and
+     not na(internalHigh) and
+     close > internalHigh
+
+// Internal bearish break
+internalBearBreak =
+     barstate.isconfirmed and
+     not na(internalLow) and
+     close < internalLow
+
+// External bullish break
+externalBullBreak =
+     barstate.isconfirmed and
+     not na(externalHigh) and
+     close > externalHigh
+
+// External bearish break
+externalBearBreak =
+     barstate.isconfirmed and
+     not na(externalLow) and
+     close < externalLow
+
+//-----------------------------------------------------------------------------
+// Internal structure
+//-----------------------------------------------------------------------------
+
+if internalBullBreak
+
+    previousBias = internalBias
+
+    internalBias := "BULLISH"
+
+    if previousBias == "BEARISH"
+        lastStructureEvent := "INTERNAL_MSS_BULLISH"
+        addEvent("Internal MSS bullish")
+    else
+        lastStructureEvent := "INTERNAL_BOS_BULLISH"
+        addEvent("Internal BOS bullish")
+
+    // The broken high becomes structural context.
+    protectedLow := internalLow
+    protectedLowBar := internalLowBar
+
+if internalBearBreak
+
+    previousBias = internalBias
+
+    internalBias := "BEARISH"
+
+    if previousBias == "BULLISH"
+        lastStructureEvent := "INTERNAL_MSS_BEARISH"
+        addEvent("Internal MSS bearish")
+    else
+        lastStructureEvent := "INTERNAL_BOS_BEARISH"
+        addEvent("Internal BOS bearish")
+
+    protectedHigh := internalHigh
+    protectedHighBar := internalHighBar
+
+//-----------------------------------------------------------------------------
+// External structure
+//-----------------------------------------------------------------------------
+
+if externalBullBreak
+
+    previousBias = externalBias
+
+    externalBias := "BULLISH"
+
+    if previousBias == "BEARISH"
+        lastStructureEvent := "EXTERNAL_MSS_BULLISH"
+        addEvent("External MSS bullish")
+    else
+        lastStructureEvent := "EXTERNAL_BOS_BULLISH"
+        addEvent("External BOS bullish")
+
+    protectedLow := externalLow
+    protectedLowBar := externalLowBar
+
+if externalBearBreak
+
+    previousBias = externalBias
+
+    externalBias := "BEARISH"
+
+    if previousBias == "BULLISH"
+        lastStructureEvent := "EXTERNAL_MSS_BEARISH"
+        addEvent("External MSS bearish")
+    else
+        lastStructureEvent := "EXTERNAL_BOS_BEARISH"
+        addEvent("External BOS bearish")
+
+    protectedHigh := externalHigh
+    protectedHighBar := externalHighBar
+
+//=============================================================================
+// REFERENCE LIQUIDITY
+//=============================================================================
+
+// Previous day
+previousDayHigh =
+     request.security(
+         syminfo.tickerid,
+         "D",
+         high[1],
+         lookahead = barmerge.lookahead_off
+     )
+
+previousDayLow =
+     request.security(
+         syminfo.tickerid,
+         "D",
+         low[1],
+         lookahead = barmerge.lookahead_off
+     )
+
+// Previous week
+previousWeekHigh =
+     request.security(
+         syminfo.tickerid,
+         "W",
+         high[1],
+         lookahead = barmerge.lookahead_off
+     )
+
+previousWeekLow =
+     request.security(
+         syminfo.tickerid,
+         "W",
+         low[1],
+         lookahead = barmerge.lookahead_off
+     )
+
+// Previous month
+previousMonthHigh =
+     request.security(
+         syminfo.tickerid,
+         "M",
+         high[1],
+         lookahead = barmerge.lookahead_off
+     )
+
+previousMonthLow =
+     request.security(
+         syminfo.tickerid,
+         "M",
+         low[1],
+         lookahead = barmerge.lookahead_off
+     )
+
+// Register reference liquidity once per newly detected level.
+// We use the level itself as the deduplication mechanism.
+
+if showPreviousDay and not na(previousDayHigh)
+    addLiquidity(previousDayHigh, true, "PDH", bar_index)
+
+if showPreviousDay and not na(previousDayLow)
+    addLiquidity(previousDayLow, false, "PDL", bar_index)
+
+if showPreviousWeek and not na(previousWeekHigh)
+    addLiquidity(previousWeekHigh, true, "PWH", bar_index)
+
+if showPreviousWeek and not na(previousWeekLow)
+    addLiquidity(previousWeekLow, false, "PWL", bar_index)
+
+if showPreviousMonth and not na(previousMonthHigh)
+    addLiquidity(previousMonthHigh, true, "PMH", bar_index)
+
+if showPreviousMonth and not na(previousMonthLow)
+    addLiquidity(previousMonthLow, false, "PML", bar_index)
+
+//=============================================================================
+// LIQUIDITY SWEEP ENGINE
+//=============================================================================
+
+// Only process confirmed bars.
+// A pool remains available for historical context after being swept.
+
+if barstate.isconfirmed and array.size(liquidityPools) > 0
+
+    for i = 0 to array.size(liquidityPools) - 1
+
+        pool = array.get(liquidityPools, i)
+
+        if pool.active and not pool.swept and not pool.invalidated
+
+            // Buy-side liquidity:
+            // price trades above the level and closes back below it.
+            buySideSweep =
+                 pool.isBuySide and
+                 high > pool.price and
+                 close < pool.price
+
+            // Sell-side liquidity:
+            // price trades below the level and closes back above it.
+            sellSideSweep =
+                 not pool.isBuySide and
+                 low < pool.price and
+                 close > pool.price
+
+            if buySideSweep
+
+                pool.swept := true
+                pool.active := false
+                pool.sweptBar := bar_index
+                pool.state := "SWEPT"
+
+                array.set(liquidityPools, i, pool)
+
+                createLiquidityEvent(
+                     pool.price,
+                     true,
+                     pool.source,
+                     "BSL_SWEPT"
+                )
+
+                // Buy-side sweep is the initial event for a bearish reversal.
+                createSetup(
+                     false,
+                     nextEventId - 1
+                )
+
+            if sellSideSweep
+
+                pool.swept := true
+                pool.active := false
+                pool.sweptBar := bar_index
+                pool.state := "SWEPT"
+
+                array.set(liquidityPools, i, pool)
+
+                createLiquidityEvent(
+                     pool.price,
+                     false,
+                     pool.source,
+                     "SSL_SWEPT"
+                )
+
+                // Sell-side sweep is the initial event for a bullish reversal.
+                createSetup(
+                     true,
+                     nextEventId - 1
+                )
+
+//=============================================================================
+// SETUP LIFECYCLE
+//=============================================================================
+
+if array.size(setups) > 0
+
+    for i = 0 to array.size(setups) - 1
+
+        setup = array.get(setups, i)
+
+        if setup.active
+
+            if bar_index > setup.expiryBar
+
+                setup.active := false
+                setup.state := "EXPIRED"
+                setup.rejectionReason := "SWEEP_EXPIRED"
+
+                array.set(setups, i, setup)
+
+                currentDiagnosticState := "EXPIRED"
+                currentRejectionReason := "SWEEP_EXPIRED"
+
+                addEvent(
+                     "SETUP #" +
+                     str.tostring(setup.id) +
+                     " expired"
+                )
+
+//=============================================================================
+// DRAWING — STRUCTURE
+//=============================================================================
+
+// Internal pivot markers
+plotshape(
+     showInternalStructure and not na(internalPivotHigh),
+     title = "Internal Pivot High",
+     style = shape.circle,
+     location = location.abovebar,
+     offset = -internalStrength,
+     size = size.tiny,
+     text = ""
+)
+
+plotshape(
+     showInternalStructure and not na(internalPivotLow),
+     title = "Internal Pivot Low",
+     style = shape.circle,
+     location = location.belowbar,
+     offset = -internalStrength,
+     size = size.tiny,
+     text = ""
+)
+
+// External pivot markers
+plotshape(
+     showExternalStructure and not na(externalPivotHigh),
+     title = "External Pivot High",
+     style = shape.diamond,
+     location = location.abovebar,
+     offset = -externalStrength,
+     size = size.tiny,
+     text = ""
+)
+
+plotshape(
+     showExternalStructure and not na(externalPivotLow),
+     title = "External Pivot Low",
+     style = shape.diamond,
+     location = location.belowbar,
+     offset = -externalStrength,
+     size = size.tiny,
+     text = ""
+)
+
+//=============================================================================
+// DRAWING — REFERENCE LEVELS
+//=============================================================================
+
+plot(
+     showPreviousDay ? previousDayHigh : na,
+     title = "Previous Day High"
+)
+
+plot(
+     showPreviousDay ? previousDayLow : na,
+     title = "Previous Day Low"
+)
+
+plot(
+     showPreviousWeek ? previousWeekHigh : na,
+     title = "Previous Week High"
+)
+
+plot(
+     showPreviousWeek ? previousWeekLow : na,
+     title = "Previous Week Low"
+)
+
+plot(
+     showPreviousMonth ? previousMonthHigh : na,
+     title = "Previous Month High"
+)
+
+plot(
+     showPreviousMonth ? previousMonthLow : na,
+     title = "Previous Month Low"
+)
+
+//=============================================================================
+// DRAWING — STRUCTURE EVENTS
+//=============================================================================
+
+plotshape(
+     showStructureLabels and
+     internalBullBreak,
+     title = "Internal Bullish Break",
+     style = shape.labelup,
+     location = location.belowbar,
+     size = size.tiny,
+     text = "iBOS"
+)
+
+plotshape(
+     showStructureLabels and
+     internalBearBreak,
+     title = "Internal Bearish Break",
+     style = shape.labeldown,
+     location = location.abovebar,
+     size = size.tiny,
+     text = "iBOS"
+)
+
+plotshape(
+     showStructureLabels and
+     externalBullBreak,
+     title = "External Bullish Break",
+     style = shape.labelup,
+     location = location.belowbar,
+     size = size.small,
+     text = "xBOS"
+)
+
+plotshape(
+     showStructureLabels and
+     externalBearBreak,
+     title = "External Bearish Break",
+     style = shape.labeldown,
+     location = location.abovebar,
+     size = size.small,
+     text = "xBOS"
+)
+
+//=============================================================================
+// DRAWING — SWEEPS
+//=============================================================================
+
+bool bullishSweepThisBar = false
+bool bearishSweepThisBar = false
+
+if array.size(liquidityEvents) > 0
+
+    latestEvent =
+         array.get(
+             liquidityEvents,
+             array.size(liquidityEvents) - 1
+         )
+
+    if latestEvent.bar == bar_index
+
+        bullishSweepThisBar :=
+             latestEvent.eventType == "SSL_SWEPT"
+
+        bearishSweepThisBar :=
+             latestEvent.eventType == "BSL_SWEPT"
+
+plotshape(
+     showSweeps and bullishSweepThisBar,
+     title = "Sell Side Liquidity Sweep",
+     style = shape.labelup,
+     location = location.belowbar,
+     size = size.small,
+     text = "SSL"
+)
+
+plotshape(
+     showSweeps and bearishSweepThisBar,
+     title = "Buy Side Liquidity Sweep",
+     style = shape.labeldown,
+     location = location.abovebar,
+     size = size.small,
+     text = "BSL"
+)
+
+//=============================================================================
+// DIAGNOSTIC PANEL
+//=============================================================================
+
+var table diagnosticTable =
+     table.new(
+         position.top_right,
+         2,
+         14
+     )
+
+if barstate.islast
+
+    if diagnosticMode
+
+        table.cell(
+             diagnosticTable,
+             0,
+             0,
+             "INSTITUTIONAL ENGINE"
+        )
+
+        table.cell(
+             diagnosticTable,
+             1,
+             0,
+             "PROTOTYPE 01"
+        )
+
+        table.cell(
+             diagnosticTable,
+             0,
+             1,
+             "Internal Structure"
+        )
+
+        table.cell(
+             diagnosticTable,
+             1,
+             1,
+             internalBias
+        )
+
+        table.cell(
+             diagnosticTable,
+             0,
+             2,
+             "External Structure"
+        )
+
+        table.cell(
+             diagnosticTable,
+             1,
+             2,
+             externalBias
+        )
+
+        table.cell(
+             diagnosticTable,
+             0,
+             3,
+             "Last Structure"
+        )
+
+        table.cell(
+             diagnosticTable,
+             1,
+             3,
+             lastStructureEvent
+        )
+
+        table.cell(
+             diagnosticTable,
+             0,
+             4,
+             "Setup State"
+        )
+
+        table.cell(
+             diagnosticTable,
+             1,
+             4,
+             currentDiagnosticState
+        )
+
+        table.cell(
+             diagnosticTable,
+             0,
+             5,
+             "Liquidity Objects"
+        )
+
+        table.cell(
+             diagnosticTable,
+             1,
+             5,
+             str.tostring(array.size(liquidityPools))
+        )
+
+        table.cell(
+             diagnosticTable,
+             0,
+             6,
+             "Liquidity Events"
+        )
+
+        table.cell(
+             diagnosticTable,
+             1,
+             6,
+             str.tostring(array.size(liquidityEvents))
+        )
+
+        table.cell(
+             diagnosticTable,
+             0,
+             7,
+             "Active Setups"
+        )
+
+        int activeSetupCount = 0
+
+        if array.size(setups) > 0
+            for i = 0 to array.size(setups) - 1
+                s = array.get(setups, i)
+
+                if s.active
+                    activeSetupCount += 1
+
+        table.cell(
+             diagnosticTable,
+             1,
+             7,
+             str.tostring(activeSetupCount)
+        )
+
+        table.cell(
+             diagnosticTable,
+             0,
+             8,
+             "Rejection"
+        )
+
+        table.cell(
+             diagnosticTable,
+             1,
+             8,
+             currentRejectionReason
+        )
+
+        // Event log
+        if showEventLog
+
+            table.cell(
+                 diagnosticTable,
+                 0,
+                 9,
+                 "EVENT LOG"
+            )
+
+            table.cell(
+                 diagnosticTable,
+                 1,
+                 9,
+                 ""
+            )
+
+            int rowsToShow =
+                 math.min(
+                     array.size(eventLog),
+                     4
+                 )
+
+            for j = 0 to rowsToShow - 1
+
+                table.cell(
+                     diagnosticTable,
+                     0,
+                     10 + j,
+                     str.tostring(j + 1)
+                )
+
+                table.cell(
+                     diagnosticTable,
+                     1,
+                     10 + j,
+                     array.get(eventLog, j)
+                )
+
+    else
+
+        table.clear(diagnosticTable, 0, 0, 1, 13)
+
+//=============================================================================
+// ALERT CONDITIONS
+//=============================================================================
+
+alertcondition(
+     internalBullBreak,
+     "Internal Bullish Structure Break",
+     "Internal bullish structure break detected."
+)
+
+alertcondition(
+     internalBearBreak,
+     "Internal Bearish Structure Break",
+     "Internal bearish structure break detected."
+)
+
+alertcondition(
+     externalBullBreak,
+     "External Bullish Structure Break",
+     "External bullish structure break detected."
+)
+
+alertcondition(
+     externalBearBreak,
+     "External Bearish Structure Break",
+     "External bearish structure break detected."
+)
+
+alertcondition(
+     bullishSweepThisBar,
+     "Sell-Side Liquidity Sweep",
+     "Sell-side liquidity sweep detected."
+)
+
+alertcondition(
+     bearishSweepThisBar,
+     "Buy-Side Liquidity Sweep",
+     "Buy-side liquidity sweep detected."
+)
