@@ -1,0 +1,205 @@
+//@version=6
+indicator("ARTHA P01.1 — Structure + Liquidity Engine", overlay=true, max_labels_count=500, max_lines_count=500)
+
+// P01.1 is intentionally limited to confirmed structure, reference liquidity,
+// liquidity sweeps, setup state, and diagnostics. No FVG/IFVG/OB/VWAP/session/
+// divergence/scoring logic is included.
+
+string G1 = "Structure"
+int iStrength = input.int(2, "Internal Pivot Strength", minval=1, group=G1)
+int xStrength = input.int(5, "External Pivot Strength", minval=2, group=G1)
+bool showInternal = input.bool(false, "Show Internal Pivots", group=G1)
+bool showExternal = input.bool(false, "Show External Pivots", group=G1)
+bool showStructure = input.bool(false, "Show Structure Events", group=G1)
+
+string G2 = "Liquidity"
+float eqAtr = input.float(0.10, "EQ tolerance (ATR)", minval=0.01, step=0.01, group=G2)
+int sweepLife = input.int(20, "Sweep setup lifetime", minval=1, group=G2)
+bool showLiquidity = input.bool(false, "Show Liquidity Levels", group=G2)
+bool showSweeps = input.bool(true, "Show Confirmed Sweeps", group=G2)
+
+string G3 = "Reference Liquidity"
+bool usePD = input.bool(true, "Previous Day", group=G3)
+bool usePW = input.bool(true, "Previous Week", group=G3)
+bool usePM = input.bool(true, "Previous Month", group=G3)
+
+string G4 = "Diagnostics"
+bool diagnostic = input.bool(false, "Diagnostic Mode", group=G4)
+
+atr = ta.atr(14)
+tol = atr * eqAtr
+
+//------------------------- confirmed pivots -------------------------
+iPH = ta.pivothigh(high, iStrength, iStrength)
+iPL = ta.pivotlow(low, iStrength, iStrength)
+xPH = ta.pivothigh(high, xStrength, xStrength)
+xPL = ta.pivotlow(low, xStrength, xStrength)
+
+var float lastIHigh = na
+var float lastILow = na
+var float lastXHigh = na
+var float lastXLow = na
+var string iBias = "NEUTRAL"
+var string xBias = "NEUTRAL"
+var string lastEvent = "NONE"
+
+string iHighClass = na(iPH) ? "" : na(lastIHigh) ? "H" : iPH > lastIHigh ? "HH" : "LH"
+string iLowClass  = na(iPL) ? "" : na(lastILow)  ? "L" : iPL > lastILow  ? "HL" : "LL"
+string xHighClass = na(xPH) ? "" : na(lastXHigh) ? "H" : xPH > lastXHigh ? "HH" : "LH"
+string xLowClass  = na(xPL) ? "" : na(lastXLow)  ? "L" : xPL > lastXLow  ? "HL" : "LL"
+
+if not na(iPH)
+    lastIHigh := iPH
+if not na(iPL)
+    lastILow := iPL
+if not na(xPH)
+    lastXHigh := xPH
+if not na(xPL)
+    lastXLow := xPL
+
+// Structure breaks are committed only on confirmed bars.
+iBullBreak = barstate.isconfirmed and not na(lastIHigh) and close > lastIHigh
+iBearBreak = barstate.isconfirmed and not na(lastILow) and close < lastILow
+xBullBreak = barstate.isconfirmed and not na(lastXHigh) and close > lastXHigh
+xBearBreak = barstate.isconfirmed and not na(lastXLow) and close < lastXLow
+
+if iBullBreak
+    lastEvent := iBias == "BEARISH" ? "iMSS_BULL" : "iBOS_BULL"
+    iBias := "BULLISH"
+if iBearBreak
+    lastEvent := iBias == "BULLISH" ? "iMSS_BEAR" : "iBOS_BEAR"
+    iBias := "BEARISH"
+if xBullBreak
+    lastEvent := xBias == "BEARISH" ? "xMSS_BULL" : "xBOS_BULL"
+    xBias := "BULLISH"
+if xBearBreak
+    lastEvent := xBias == "BULLISH" ? "xMSS_BEAR" : "xBOS_BEAR"
+    xBias := "BEARISH"
+
+//------------------------- reference liquidity -------------------------
+pdh = request.security(syminfo.tickerid, "D", high[1], lookahead=barmerge.lookahead_off)
+pdl = request.security(syminfo.tickerid, "D", low[1], lookahead=barmerge.lookahead_off)
+pwh = request.security(syminfo.tickerid, "W", high[1], lookahead=barmerge.lookahead_off)
+pwl = request.security(syminfo.tickerid, "W", low[1], lookahead=barmerge.lookahead_off)
+pmh = request.security(syminfo.tickerid, "M", high[1], lookahead=barmerge.lookahead_off)
+pml = request.security(syminfo.tickerid, "M", low[1], lookahead=barmerge.lookahead_off)
+
+//------------------------- sweep engine -------------------------
+// Each reference level has a simple confirmed lifecycle in P01.1.
+var bool pdhSwept = false
+var bool pdlSwept = false
+var bool pwhSwept = false
+var bool pwlSwept = false
+var bool pmhSwept = false
+var bool pmlSwept = false
+
+// Reset lifecycle when the reference level changes.
+if ta.change(pdh) != 0
+    pdhSwept := false
+if ta.change(pdl) != 0
+    pdlSwept := false
+if ta.change(pwh) != 0
+    pwhSwept := false
+if ta.change(pwl) != 0
+    pwlSwept := false
+if ta.change(pmh) != 0
+    pmhSwept := false
+if ta.change(pml) != 0
+    pmlSwept := false
+
+pdhSweep = barstate.isconfirmed and usePD and not pdhSwept and high > pdh and close < pdh
+pdlSweep = barstate.isconfirmed and usePD and not pdlSwept and low < pdl and close > pdl
+pwhSweep = barstate.isconfirmed and usePW and not pwhSwept and high > pwh and close < pwh
+pwlSweep = barstate.isconfirmed and usePW and not pwlSwept and low < pwl and close > pwl
+pmhSweep = barstate.isconfirmed and usePM and not pmhSwept and high > pmh and close < pmh
+pmlSweep = barstate.isconfirmed and usePM and not pmlSwept and low < pml and close > pml
+
+if pdhSweep
+    pdhSwept := true
+if pdlSweep
+    pdlSwept := true
+if pwhSweep
+    pwhSwept := true
+if pwlSweep
+    pwlSwept := true
+if pmhSweep
+    pmhSwept := true
+if pmlSweep
+    pmlSwept := true
+
+bullSweep = pdlSweep or pwlSweep or pmlSweep
+bearSweep = pdhSweep or pwhSweep or pmhSweep
+
+//------------------------- setup state -------------------------
+// State mutation happens in main scope; functions do not mutate globals.
+var string setupState = "IDLE"
+var string setupDirection = "NONE"
+var int setupCreated = na
+var string rejection = "NONE"
+
+if bullSweep
+    setupState := "WAIT_DISPLACEMENT"
+    setupDirection := "LONG"
+    setupCreated := bar_index
+    rejection := "NONE"
+
+if bearSweep
+    setupState := "WAIT_DISPLACEMENT"
+    setupDirection := "SHORT"
+    setupCreated := bar_index
+    rejection := "NONE"
+
+if setupState != "IDLE" and not na(setupCreated) and bar_index - setupCreated > sweepLife
+    setupState := "EXPIRED"
+    rejection := "SWEEP_EXPIRED"
+
+//------------------------- plots -------------------------
+plot(showLiquidity and usePD ? pdh : na, "PDH")
+plot(showLiquidity and usePD ? pdl : na, "PDL")
+plot(showLiquidity and usePW ? pwh : na, "PWH")
+plot(showLiquidity and usePW ? pwl : na, "PWL")
+plot(showLiquidity and usePM ? pmh : na, "PMH")
+plot(showLiquidity and usePM ? pml : na, "PML")
+
+plotshape(showInternal and not na(iPH), "Internal High", shape.circle, location.abovebar, offset=-iStrength, size=size.tiny)
+plotshape(showInternal and not na(iPL), "Internal Low", shape.circle, location.belowbar, offset=-iStrength, size=size.tiny)
+plotshape(showExternal and not na(xPH), "External High", shape.diamond, location.abovebar, offset=-xStrength, size=size.tiny)
+plotshape(showExternal and not na(xPL), "External Low", shape.diamond, location.belowbar, offset=-xStrength, size=size.tiny)
+
+plotshape(showStructure and iBullBreak, "iBOS/MSS Bull", shape.labelup, location.belowbar, text="iBOS/MSS", size=size.tiny)
+plotshape(showStructure and iBearBreak, "iBOS/MSS Bear", shape.labeldown, location.abovebar, text="iBOS/MSS", size=size.tiny)
+plotshape(showStructure and xBullBreak, "xBOS/MSS Bull", shape.labelup, location.belowbar, text="xBOS/MSS", size=size.tiny)
+plotshape(showStructure and xBearBreak, "xBOS/MSS Bear", shape.labeldown, location.abovebar, text="xBOS/MSS", size=size.tiny)
+
+plotshape(showSweeps and bullSweep, "Bullish Liquidity Sweep", shape.labelup, location.belowbar, text="SSL SWEEP", size=size.tiny)
+plotshape(showSweeps and bearSweep, "Bearish Liquidity Sweep", shape.labeldown, location.abovebar, text="BSL SWEEP", size=size.tiny)
+
+//------------------------- diagnostic panel -------------------------
+var table t = table.new(position.top_right, 2, 10)
+if barstate.islast
+    if diagnostic
+        table.cell(t, 0, 0, "ARTHA P01.1")
+        table.cell(t, 1, 0, "ENGINE")
+        table.cell(t, 0, 1, "Internal bias")
+        table.cell(t, 1, 1, iBias)
+        table.cell(t, 0, 2, "External bias")
+        table.cell(t, 1, 2, xBias)
+        table.cell(t, 0, 3, "Last structure")
+        table.cell(t, 1, 3, lastEvent)
+        table.cell(t, 0, 4, "Setup")
+        table.cell(t, 1, 4, setupState)
+        table.cell(t, 0, 5, "Direction")
+        table.cell(t, 1, 5, setupDirection)
+        table.cell(t, 0, 6, "Setup age")
+        table.cell(t, 1, 6, na(setupCreated) ? "-" : str.tostring(bar_index - setupCreated))
+        table.cell(t, 0, 7, "Rejection")
+        table.cell(t, 1, 7, rejection)
+        table.cell(t, 0, 8, "Confirmed bar")
+        table.cell(t, 1, 8, barstate.isconfirmed ? "YES" : "NO")
+        table.cell(t, 0, 9, "Pivots")
+        table.cell(t, 1, 9, "i=" + str.tostring(iStrength) + " / x=" + str.tostring(xStrength))
+    else
+        table.clear(t, 0, 0, 1, 9)
+
+alertcondition(bullSweep, "ARTHA Bullish Liquidity Sweep", "Confirmed sell-side liquidity sweep.")
+alertcondition(bearSweep, "ARTHA Bearish Liquidity Sweep", "Confirmed buy-side liquidity sweep.")
