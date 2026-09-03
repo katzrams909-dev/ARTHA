@@ -1,0 +1,356 @@
+//@version=6
+indicator("ARTHA P01.4 — Core Engine Integrated", overlay=true, max_lines_count=500, max_labels_count=500)
+
+// ARTHA P01.4
+// Foundation only: confirmed market structure, previous D/W/M liquidity,
+// liquidity lifecycle, setup state, diagnostics, and separated visualization.
+// No FVG/IFVG, OB/Breaker, sessions, VWAP, divergence, HTF scoring, or entry
+// model is implemented here.
+
+//========================= INPUTS =========================
+string G1 = "01 Structure"
+int iStrength = input.int(2, "Internal pivot strength", minval=1, group=G1)
+int xStrength = input.int(5, "External pivot strength", minval=2, group=G1)
+bool showInternal = input.bool(false, "Show internal pivots", group=G1)
+bool showExternal = input.bool(false, "Show external pivots", group=G1)
+bool showStructure = input.bool(false, "Show structure text", group=G1)
+
+string G2 = "02 Liquidity"
+int sweepLife = input.int(20, "Sweep setup lifetime", minval=1, group=G2)
+bool usePD = input.bool(true, "Previous Day", group=G2)
+bool usePW = input.bool(true, "Previous Week", group=G2)
+bool usePM = input.bool(true, "Previous Month", group=G2)
+
+string G3 = "03 Display"
+bool showLiquidity = input.bool(true, "Show active liquidity", group=G3)
+bool showConsumed = input.bool(false, "Show consumed liquidity", group=G3)
+bool showSweeps = input.bool(true, "Show sweep text", group=G3)
+bool showLevelText = input.bool(true, "Show level text", group=G3)
+
+string G4 = "04 Diagnostics"
+string displayMode = input.string("CLEAN", "Display mode", options=["CLEAN", "ANALYSIS", "DIAGNOSTIC"], group=G4)
+bool diagnostic = displayMode == "DIAGNOSTIC"
+
+//========================= CONFIRMED PIVOTS =========================
+iPH = ta.pivothigh(high, iStrength, iStrength)
+iPL = ta.pivotlow(low, iStrength, iStrength)
+xPH = ta.pivothigh(high, xStrength, xStrength)
+xPL = ta.pivotlow(low, xStrength, xStrength)
+
+var float lastIHigh = na
+var float lastILow = na
+var float lastXHigh = na
+var float lastXLow = na
+var string iBias = "NEUTRAL"
+var string xBias = "NEUTRAL"
+var string lastStructure = "NONE"
+
+if not na(iPH)
+    lastIHigh := iPH
+if not na(iPL)
+    lastILow := iPL
+if not na(xPH)
+    lastXHigh := xPH
+if not na(xPL)
+    lastXLow := xPL
+
+iBullBreak = barstate.isconfirmed and not na(lastIHigh) and close > lastIHigh
+iBearBreak = barstate.isconfirmed and not na(lastILow) and close < lastILow
+xBullBreak = barstate.isconfirmed and not na(lastXHigh) and close > lastXHigh
+xBearBreak = barstate.isconfirmed and not na(lastXLow) and close < lastXLow
+
+if iBullBreak
+    lastStructure := iBias == "BEARISH" ? "iCHoCH_BULL" : "iBOS_BULL"
+    iBias := "BULLISH"
+if iBearBreak
+    lastStructure := iBias == "BULLISH" ? "iCHoCH_BEAR" : "iBOS_BEAR"
+    iBias := "BEARISH"
+if xBullBreak
+    lastStructure := xBias == "BEARISH" ? "xCHoCH_BULL" : "xBOS_BULL"
+    xBias := "BULLISH"
+if xBearBreak
+    lastStructure := xBias == "BULLISH" ? "xCHoCH_BEAR" : "xBOS_BEAR"
+    xBias := "BEARISH"
+
+//========================= PREVIOUS PERIOD DATA =========================
+// Previous completed HTF bar is requested directly. The combination of [1]
+// with lookahead_on is the standard stable HTF reference pattern: no current
+// developing HTF value is exposed to historical intraday bars.
+pdH_src = request.security(syminfo.tickerid, "D", high[1], lookahead=barmerge.lookahead_on)
+pdL_src = request.security(syminfo.tickerid, "D", low[1], lookahead=barmerge.lookahead_on)
+pwH_src = request.security(syminfo.tickerid, "W", high[1], lookahead=barmerge.lookahead_on)
+pwL_src = request.security(syminfo.tickerid, "W", low[1], lookahead=barmerge.lookahead_on)
+pmH_src = request.security(syminfo.tickerid, "M", high[1], lookahead=barmerge.lookahead_on)
+pmL_src = request.security(syminfo.tickerid, "M", low[1], lookahead=barmerge.lookahead_on)
+
+newDay = ta.change(time("D")) != 0
+newWeek = ta.change(time("W")) != 0
+newMonth = ta.change(time("M")) != 0
+
+//========================= LIQUIDITY STATE =========================
+// State: ACTIVE -> SWEPT/CONSUMED. The state remains available to the engine
+// even when its chart object is hidden.
+var float pdH = na
+var float pdL = na
+var float pwH = na
+var float pwL = na
+var float pmH = na
+var float pmL = na
+var bool pdHActive = false
+var bool pdLActive = false
+var bool pwHActive = false
+var bool pwLActive = false
+var bool pmHActive = false
+var bool pmLActive = false
+
+if barstate.isfirst
+    pdH := pdH_src
+    pdL := pdL_src
+    pwH := pwH_src
+    pwL := pwL_src
+    pmH := pmH_src
+    pmL := pmL_src
+    pdHActive := usePD and not na(pdH)
+    pdLActive := usePD and not na(pdL)
+    pwHActive := usePW and not na(pwH)
+    pwLActive := usePW and not na(pwL)
+    pmHActive := usePM and not na(pmH)
+    pmLActive := usePM and not na(pmL)
+
+if newDay and barstate.isconfirmed
+    pdH := pdH_src
+    pdL := pdL_src
+    pdHActive := usePD and not na(pdH)
+    pdLActive := usePD and not na(pdL)
+
+if newWeek and barstate.isconfirmed
+    pwH := pwH_src
+    pwL := pwL_src
+    pwHActive := usePW and not na(pwH)
+    pwLActive := usePW and not na(pwL)
+
+if newMonth and barstate.isconfirmed
+    pmH := pmH_src
+    pmL := pmL_src
+    pmHActive := usePM and not na(pmH)
+    pmLActive := usePM and not na(pmL)
+
+//========================= SWEEP EVENTS =========================
+pdHSweep = barstate.isconfirmed and pdHActive and high > pdH and close < pdH
+pdLSweep = barstate.isconfirmed and pdLActive and low < pdL and close > pdL
+pwHSweep = barstate.isconfirmed and pwHActive and high > pwH and close < pwH
+pwLSweep = barstate.isconfirmed and pwLActive and low < pwL and close > pwL
+pmHSweep = barstate.isconfirmed and pmHActive and high > pmH and close < pmH
+pmLSweep = barstate.isconfirmed and pmLActive and low < pmL and close > pmL
+
+if pdHSweep
+    pdHActive := false
+if pdLSweep
+    pdLActive := false
+if pwHSweep
+    pwHActive := false
+if pwLSweep
+    pwLActive := false
+if pmHSweep
+    pmHActive := false
+if pmLSweep
+    pmLActive := false
+
+bullSweep = pdLSweep or pwLSweep or pmLSweep
+bearSweep = pdHSweep or pwHSweep or pmHSweep
+
+//========================= SETUP STATE =========================
+var string setupState = "IDLE"
+var string setupDirection = "NONE"
+var int setupCreated = na
+var string rejection = "NONE"
+
+if bullSweep
+    setupState := "WAIT_DISPLACEMENT"
+    setupDirection := "LONG"
+    setupCreated := bar_index
+    rejection := "NONE"
+
+if bearSweep
+    setupState := "WAIT_DISPLACEMENT"
+    setupDirection := "SHORT"
+    setupCreated := bar_index
+    rejection := "NONE"
+
+if setupState == "WAIT_DISPLACEMENT" and not na(setupCreated) and bar_index - setupCreated > sweepLife
+    setupState := "EXPIRED"
+    rejection := "SWEEP_EXPIRED"
+
+//========================= DRAWING LIFECYCLE =========================
+var line pdHL = na
+var line pdLL = na
+var line pwHL = na
+var line pwLL = na
+var line pmHL = na
+var line pmLL = na
+var label pdHT = na
+var label pdLT = na
+var label pwHT = na
+var label pwLT = na
+var label pmHT = na
+var label pmLT = na
+
+f_delete_line_label(line ln, label lb) =>
+    if not na(ln)
+        line.delete(ln)
+    if not na(lb)
+        label.delete(lb)
+
+// Rebuild only at period boundaries. The function above performs no global
+// mutation; it only receives and acts on object handles.
+if newDay
+    f_delete_line_label(pdHL, pdHT)
+    f_delete_line_label(pdLL, pdLT)
+    pdHL := na
+    pdLL := na
+    pdHT := na
+    pdLT := na
+
+if newWeek
+    f_delete_line_label(pwHL, pwHT)
+    f_delete_line_label(pwLL, pwLT)
+    pwHL := na
+    pwLL := na
+    pwHT := na
+    pwLT := na
+
+if newMonth
+    f_delete_line_label(pmHL, pmHT)
+    f_delete_line_label(pmLL, pmLT)
+    pmHL := na
+    pmLL := na
+    pmHT := na
+    pmLT := na
+
+bool canDrawPDH = displayMode != "CLEAN" or showLiquidity
+bool canDrawPDL = displayMode != "CLEAN" or showLiquidity
+bool canDrawPWH = displayMode != "CLEAN" or showLiquidity
+bool canDrawPWL = displayMode != "CLEAN" or showLiquidity
+bool canDrawPMH = displayMode != "CLEAN" or showLiquidity
+bool canDrawPML = displayMode != "CLEAN" or showLiquidity
+
+if newDay and canDrawPDH and pdHActive and not na(pdH)
+    pdHL := line.new(bar_index, pdH, bar_index, pdH, extend=extend.none)
+    if showLevelText
+        pdHT := label.new(bar_index, pdH, "PDH", style=label.style_none)
+if newDay and canDrawPDL and pdLActive and not na(pdL)
+    pdLL := line.new(bar_index, pdL, bar_index, pdL, extend=extend.none)
+    if showLevelText
+        pdLT := label.new(bar_index, pdL, "PDL", style=label.style_none)
+
+if newWeek and canDrawPWH and pwHActive and not na(pwH)
+    pwHL := line.new(bar_index, pwH, bar_index, pwH, extend=extend.none)
+    if showLevelText
+        pwHT := label.new(bar_index, pwH, "PWH", style=label.style_none)
+if newWeek and canDrawPWL and pwLActive and not na(pwL)
+    pwLL := line.new(bar_index, pwL, bar_index, pwL, extend=extend.none)
+    if showLevelText
+        pwLT := label.new(bar_index, pwL, "PWL", style=label.style_none)
+
+if newMonth and canDrawPMH and pmHActive and not na(pmH)
+    pmHL := line.new(bar_index, pmH, bar_index, pmH, extend=extend.none)
+    if showLevelText
+        pmHT := label.new(bar_index, pmH, "PMH", style=label.style_none)
+if newMonth and canDrawPML and pmLActive and not na(pmL)
+    pmLL := line.new(bar_index, pmL, bar_index, pmL, extend=extend.none)
+    if showLevelText
+        pmLT := label.new(bar_index, pmL, "PML", style=label.style_none)
+
+if not na(pdHL) and pdHActive
+    line.set_x2(pdHL, bar_index)
+if not na(pdLL) and pdLActive
+    line.set_x2(pdLL, bar_index)
+if not na(pwHL) and pwHActive
+    line.set_x2(pwHL, bar_index)
+if not na(pwLL) and pwLActive
+    line.set_x2(pwLL, bar_index)
+if not na(pmHL) and pmHActive
+    line.set_x2(pmHL, bar_index)
+if not na(pmLL) and pmLActive
+    line.set_x2(pmLL, bar_index)
+
+// Remove active drawing immediately after confirmed consumption.
+if pdHSweep
+    f_delete_line_label(pdHL, pdHT)
+    pdHL := na
+    pdHT := na
+if pdLSweep
+    f_delete_line_label(pdLL, pdLT)
+    pdLL := na
+    pdLT := na
+if pwHSweep
+    f_delete_line_label(pwHL, pwHT)
+    pwHL := na
+    pwHT := na
+if pwLSweep
+    f_delete_line_label(pwLL, pwLT)
+    pwLL := na
+    pwLT := na
+if pmHSweep
+    f_delete_line_label(pmHL, pmHT)
+    pmHL := na
+    pmHT := na
+if pmLSweep
+    f_delete_line_label(pmLL, pmLT)
+    pmLL := na
+    pmLT := na
+
+//========================= STRUCTURE VISUALS =========================
+plotshape(showInternal and not na(iPH), title="Internal High", style=shape.circle, location=location.abovebar, offset=-iStrength, size=size.tiny)
+plotshape(showInternal and not na(iPL), title="Internal Low", style=shape.circle, location=location.belowbar, offset=-iStrength, size=size.tiny)
+plotshape(showExternal and not na(xPH), title="External High", style=shape.diamond, location=location.abovebar, offset=-xStrength, size=size.tiny)
+plotshape(showExternal and not na(xPL), title="External Low", style=shape.diamond, location=location.belowbar, offset=-xStrength, size=size.tiny)
+
+plotshape(showStructure and iBullBreak, title="iBOS/iCHoCH Bull", style=shape.labelup, location=location.belowbar, text="iBOS/iCHoCH", size=size.tiny)
+plotshape(showStructure and iBearBreak, title="iBOS/iCHoCH Bear", style=shape.labeldown, location=location.abovebar, text="iBOS/iCHoCH", size=size.tiny)
+plotshape(showStructure and xBullBreak, title="xBOS/xCHoCH Bull", style=shape.labelup, location=location.belowbar, text="xBOS/xCHoCH", size=size.tiny)
+plotshape(showStructure and xBearBreak, title="xBOS/xCHoCH Bear", style=shape.labeldown, location=location.abovebar, text="xBOS/xCHoCH", size=size.tiny)
+
+plotshape(showSweeps and pdHSweep, title="PDH Sweep", style=shape.labeldown, location=location.abovebar, text="PDH sweep", size=size.tiny)
+plotshape(showSweeps and pdLSweep, title="PDL Sweep", style=shape.labelup, location=location.belowbar, text="PDL sweep", size=size.tiny)
+plotshape(showSweeps and pwHSweep, title="PWH Sweep", style=shape.labeldown, location=location.abovebar, text="PWH sweep", size=size.tiny)
+plotshape(showSweeps and pwLSweep, title="PWL Sweep", style=shape.labelup, location=location.belowbar, text="PWL sweep", size=size.tiny)
+plotshape(showSweeps and pmHSweep, title="PMH Sweep", style=shape.labeldown, location=location.abovebar, text="PMH sweep", size=size.tiny)
+plotshape(showSweeps and pmLSweep, title="PML Sweep", style=shape.labelup, location=location.belowbar, text="PML sweep", size=size.tiny)
+
+//========================= DIAGNOSTICS =========================
+var table diag = table.new(position.top_right, 2, 12)
+if barstate.islast
+    if diagnostic
+        table.cell(diag, 0, 0, "ARTHA P01.4")
+        table.cell(diag, 1, 0, "ENGINE")
+        table.cell(diag, 0, 1, "Internal bias")
+        table.cell(diag, 1, 1, iBias)
+        table.cell(diag, 0, 2, "External bias")
+        table.cell(diag, 1, 2, xBias)
+        table.cell(diag, 0, 3, "Last structure")
+        table.cell(diag, 1, 3, lastStructure)
+        table.cell(diag, 0, 4, "Setup state")
+        table.cell(diag, 1, 4, setupState)
+        table.cell(diag, 0, 5, "Setup direction")
+        table.cell(diag, 1, 5, setupDirection)
+        table.cell(diag, 0, 6, "PDH")
+        table.cell(diag, 1, 6, pdHActive ? "ACTIVE" : "CONSUMED")
+        table.cell(diag, 0, 7, "PDL")
+        table.cell(diag, 1, 7, pdLActive ? "ACTIVE" : "CONSUMED")
+        table.cell(diag, 0, 8, "PWH/PWL")
+        table.cell(diag, 1, 8, (pwHActive ? "H:" : "H:X") + (pwLActive ? " L:ACTIVE" : " L:X"))
+        table.cell(diag, 0, 9, "PMH/PML")
+        table.cell(diag, 1, 9, (pmHActive ? "H:" : "H:X") + (pmLActive ? " L:ACTIVE" : " L:X"))
+        table.cell(diag, 0, 10, "Confirmed bar")
+        table.cell(diag, 1, 10, barstate.isconfirmed ? "YES" : "NO")
+        table.cell(diag, 0, 11, "Engine note")
+        table.cell(diag, 1, 11, "No future HTF data")
+    else
+        table.clear(diag, 0, 0, 1, 11)
+
+//========================= ALERTS =========================
+alertcondition(bullSweep, "ARTHA Bullish Liquidity Sweep", "Confirmed sell-side liquidity sweep")
+alertcondition(bearSweep, "ARTHA Bearish Liquidity Sweep", "Confirmed buy-side liquidity sweep")
+alertcondition(iBullBreak or xBullBreak, "ARTHA Bullish Structure Break", "Confirmed bullish structure break")
+alertcondition(iBearBreak or xBearBreak, "ARTHA Bearish Structure Break", "Confirmed bearish structure break")
