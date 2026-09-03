@@ -1,11 +1,6 @@
 //@version=6
 indicator("ARTHA P01.3 — Previous Period Reference Engine", overlay=true, max_lines_count=100, max_labels_count=100)
 
-// P01.3: previous completed Day/Week/Month reference levels.
-// Levels are snapshotted at the first bar of the current period, drawn only
-// across that current period, and removed after a confirmed liquidity sweep.
-// No lookahead is used. Calculation remains independent of display settings.
-
 string G = "Display"
 bool showDay = input.bool(true, "Previous Day", group=G)
 bool showWeek = input.bool(true, "Previous Week", group=G)
@@ -13,22 +8,21 @@ bool showMonth = input.bool(true, "Previous Month", group=G)
 bool showLabels = input.bool(true, "Level Text", group=G)
 bool showSweeps = input.bool(true, "Sweep Text", group=G)
 
-// Detect period boundaries on the chart's exchange calendar.
 newDay = ta.change(time("D")) != 0
 newWeek = ta.change(time("W")) != 0
 newMonth = ta.change(time("M")) != 0
 
-// Confirmed completed-period values. These are requested from the HTF context
-// using the prior completed bar, with lookahead disabled.
-pDayHigh = request.security(syminfo.tickerid, "D", high[1], lookahead=barmerge.lookahead_off)
-pDayLow = request.security(syminfo.tickerid, "D", low[1], lookahead=barmerge.lookahead_off)
-pWeekHigh = request.security(syminfo.tickerid, "W", high[1], lookahead=barmerge.lookahead_off)
-pWeekLow = request.security(syminfo.tickerid, "W", low[1], lookahead=barmerge.lookahead_off)
-pMonthHigh = request.security(syminfo.tickerid, "M", high[1], lookahead=barmerge.lookahead_off)
-pMonthLow = request.security(syminfo.tickerid, "M", low[1], lookahead=barmerge.lookahead_off)
+// IMPORTANT: [1] references the already completed HTF candle. lookahead_on is
+// safe here because the expression itself is one HTF bar behind. It prevents
+// lookahead_off from delaying the prior-period value until the current HTF
+// candle closes, which was the source of the apparent D/W/M lag.
+pDayHigh = request.security(syminfo.tickerid, "D", high[1], lookahead=barmerge.lookahead_on)
+pDayLow = request.security(syminfo.tickerid, "D", low[1], lookahead=barmerge.lookahead_on)
+pWeekHigh = request.security(syminfo.tickerid, "W", high[1], lookahead=barmerge.lookahead_on)
+pWeekLow = request.security(syminfo.tickerid, "W", low[1], lookahead=barmerge.lookahead_on)
+pMonthHigh = request.security(syminfo.tickerid, "M", high[1], lookahead=barmerge.lookahead_on)
+pMonthLow = request.security(syminfo.tickerid, "M", low[1], lookahead=barmerge.lookahead_on)
 
-// We store each level at its period transition. This prevents the reference
-// from shifting during the active period.
 var float dayH = na
 var float dayL = na
 var float weekH = na
@@ -44,21 +38,16 @@ if barstate.isfirst
     monthH := pMonthHigh
     monthL := pMonthLow
 
-if newDay and barstate.isconfirmed
+if newDay
     dayH := pDayHigh
     dayL := pDayLow
-
-if newWeek and barstate.isconfirmed
+if newWeek
     weekH := pWeekHigh
     weekL := pWeekLow
-
-if newMonth and barstate.isconfirmed
+if newMonth
     monthH := pMonthHigh
     monthL := pMonthLow
 
-// Drawing lifecycle: each current-period reference has one line and one text
-// label. Objects are created at the current period start, not at the prior
-// period's start. They are deleted when swept or when the period ends.
 var line dHLine = na
 var line dLLine = na
 var line wHLine = na
@@ -73,71 +62,52 @@ var label mHLabel = na
 var label mLLabel = na
 
 if newDay
-    if not na(dHLine)
-        line.delete(dHLine)
-    if not na(dLLine)
-        line.delete(dLLine)
-    if not na(dHLabel)
-        label.delete(dHLabel)
-    if not na(dLLabel)
-        label.delete(dLLabel)
+    line.delete(dHLine)
+    line.delete(dLLine)
+    label.delete(dHLabel)
+    label.delete(dLLabel)
     dHLine := na
     dLLine := na
     dHLabel := na
     dLLabel := na
-
 if newWeek
-    if not na(wHLine)
-        line.delete(wHLine)
-    if not na(wLLine)
-        line.delete(wLLine)
-    if not na(wHLabel)
-        label.delete(wHLabel)
-    if not na(wLLabel)
-        label.delete(wLLabel)
+    line.delete(wHLine)
+    line.delete(wLLine)
+    label.delete(wHLabel)
+    label.delete(wLLabel)
     wHLine := na
     wLLine := na
     wHLabel := na
     wLLabel := na
-
 if newMonth
-    if not na(mHLine)
-        line.delete(mHLine)
-    if not na(mLLine)
-        line.delete(mLLine)
-    if not na(mHLabel)
-        label.delete(mHLabel)
-    if not na(mLLabel)
-        label.delete(mLLabel)
+    line.delete(mHLine)
+    line.delete(mLLine)
+    label.delete(mHLabel)
+    label.delete(mLLabel)
     mHLine := na
     mLLine := na
     mHLabel := na
     mLLabel := na
 
-// Create references after the period transition snapshot.
-if newDay and showDay and not na(dayH) and not na(dayL)
+if (newDay or barstate.isfirst) and showDay and not na(dayH) and not na(dayL)
     dHLine := line.new(bar_index, dayH, bar_index, dayH, extend=extend.none)
     dLLine := line.new(bar_index, dayL, bar_index, dayL, extend=extend.none)
     if showLabels
         dHLabel := label.new(bar_index, dayH, "PDH", style=label.style_none)
         dLLabel := label.new(bar_index, dayL, "PDL", style=label.style_none)
-
-if newWeek and showWeek and not na(weekH) and not na(weekL)
+if (newWeek or barstate.isfirst) and showWeek and not na(weekH) and not na(weekL)
     wHLine := line.new(bar_index, weekH, bar_index, weekH, extend=extend.none)
     wLLine := line.new(bar_index, weekL, bar_index, weekL, extend=extend.none)
     if showLabels
         wHLabel := label.new(bar_index, weekH, "PWH", style=label.style_none)
         wLLabel := label.new(bar_index, weekL, "PWL", style=label.style_none)
-
-if newMonth and showMonth and not na(monthH) and not na(monthL)
+if (newMonth or barstate.isfirst) and showMonth and not na(monthH) and not na(monthL)
     mHLine := line.new(bar_index, monthH, bar_index, monthH, extend=extend.none)
     mLLine := line.new(bar_index, monthL, bar_index, monthL, extend=extend.none)
     if showLabels
         mHLabel := label.new(bar_index, monthH, "PMH", style=label.style_none)
         mLLabel := label.new(bar_index, monthL, "PML", style=label.style_none)
 
-// Extend only while the reference is active. The engine itself continues to
-// calculate even if drawings are hidden.
 if not na(dHLine)
     line.set_x2(dHLine, bar_index)
     line.set_x2(dLLine, bar_index)
@@ -148,40 +118,63 @@ if not na(mHLine)
     line.set_x2(mHLine, bar_index)
     line.set_x2(mLLine, bar_index)
 
-// Confirmed sweep = wick through level followed by close back inside.
-dHSweep = barstate.isconfirmed and not na(dayH) and high > dayH and close < dayH
-dLSweep = barstate.isconfirmed and not na(dayL) and low < dayL and close > dayL
-wHSweep = barstate.isconfirmed and not na(weekH) and high > weekH and close < weekH
-wLSweep = barstate.isconfirmed and not na(weekL) and low < weekL and close > weekL
-mHSweep = barstate.isconfirmed and not na(monthH) and high > monthH and close < monthH
-mLSweep = barstate.isconfirmed and not na(monthL) and low < monthL and close > monthL
+// A consumed level cannot generate another sweep during the same period.
+var bool dayHConsumed = false
+var bool dayLConsumed = false
+var bool weekHConsumed = false
+var bool weekLConsumed = false
+var bool monthHConsumed = false
+var bool monthLConsumed = false
+
+if newDay
+    dayHConsumed := false
+    dayLConsumed := false
+if newWeek
+    weekHConsumed := false
+    weekLConsumed := false
+if newMonth
+    monthHConsumed := false
+    monthLConsumed := false
+
+dHSweep = barstate.isconfirmed and not dayHConsumed and not na(dayH) and high > dayH and close < dayH
+dLSweep = barstate.isconfirmed and not dayLConsumed and not na(dayL) and low < dayL and close > dayL
+wHSweep = barstate.isconfirmed and not weekHConsumed and not na(weekH) and high > weekH and close < weekH
+wLSweep = barstate.isconfirmed and not weekLConsumed and not na(weekL) and low < weekL and close > weekL
+mHSweep = barstate.isconfirmed and not monthHConsumed and not na(monthH) and high > monthH and close < monthH
+mLSweep = barstate.isconfirmed and not monthLConsumed and not na(monthL) and low < monthL and close > monthL
 
 if dHSweep
+    dayHConsumed := true
     line.delete(dHLine)
     label.delete(dHLabel)
     dHLine := na
     dHLabel := na
 if dLSweep
+    dayLConsumed := true
     line.delete(dLLine)
     label.delete(dLLabel)
     dLLine := na
     dLLabel := na
 if wHSweep
+    weekHConsumed := true
     line.delete(wHLine)
     label.delete(wHLabel)
     wHLine := na
     wHLabel := na
 if wLSweep
+    weekLConsumed := true
     line.delete(wLLine)
     label.delete(wLLabel)
     wLLine := na
     wLLabel := na
 if mHSweep
+    monthHConsumed := true
     line.delete(mHLine)
     label.delete(mHLabel)
     mHLine := na
     mHLabel := na
 if mLSweep
+    monthLConsumed := true
     line.delete(mLLine)
     label.delete(mLLabel)
     mLLine := na
