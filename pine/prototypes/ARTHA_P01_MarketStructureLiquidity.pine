@@ -1,0 +1,345 @@
+//@version=6
+indicator("ARTHA — P01 Market Structure + Liquidity", shorttitle="ARTHA P01", overlay=true, max_labels_count=500, max_lines_count=500)
+
+//=============================================================================\n// ARTHA P01\n// Market Structure + Liquidity + Diagnostic Foundation\n//\n// Design rule: engine state is committed only on confirmed bars.\n// No user-defined function mutates global scalar state.\n//=============================================================================\n
+groupS = "01 — Structure"
+internalLen = input.int(2, "Internal pivot strength", minval=1, group=groupS)
+externalLen = input.int(5, "External pivot strength", minval=2, group=groupS)
+showInternal = input.bool(true, "Show internal pivots", group=groupS)
+showExternal = input.bool(true, "Show external pivots", group=groupS)
+showStructure = input.bool(true, "Show structure breaks", group=groupS)
+
+groupL = "02 — Liquidity"
+eqTolATR = input.float(0.10, "EQH/EQL clustering tolerance (ATR)", minval=0.01, step=0.01, group=groupL)
+showLiquidity = input.bool(true, "Show active liquidity", group=groupL)
+showSweeps = input.bool(true, "Show confirmed sweeps", group=groupL)
+maxLiquidity = input.int(50, "Maximum liquidity objects", minval=10, maxval=100, group=groupL)
+
+groupR = "03 — Reference Liquidity"
+usePD = input.bool(true, "Previous day high/low", group=groupR)
+usePW = input.bool(true, "Previous week high/low", group=groupR)
+usePM = input.bool(true, "Previous month high/low", group=groupR)
+
+groupD = "04 — Diagnostics"
+diagnostic = input.bool(false, "Diagnostic mode", group=groupD)
+showEvents = input.bool(true, "Show event log", group=groupD)
+
+//=============================================================================\n// TYPES\n//=============================================================================\n
+type Liquidity
+    int id
+    float price
+    bool buySide
+    bool active
+    bool swept
+    int createdBar
+    int sweptBar
+    string source
+
+type Setup
+    int id
+    bool active
+    bool isLong
+    int createdBar
+    int expiryBar
+    string state
+    int liquidityEventId
+    string rejection
+
+//=============================================================================\n// STATE\n//=============================================================================\n
+var array<Liquidity> liquidity = array.new<Liquidity>()
+var array<Setup> setups = array.new<Setup>()
+var array<string> events = array.new_string()
+
+var int nextLiquidityId = 1
+var int nextSetupId = 1
+var int nextLiquidityEventId = 1
+
+var string internalBias = "NEUTRAL"
+var string externalBias = "NEUTRAL"
+var string lastStructure = "NONE"
+var string engineState = "IDLE"
+var string rejection = "NONE"
+
+var float iHigh = na
+var float iLow = na
+var float xHigh = na
+var float xLow = na
+var int iHighBar = na
+var int iLowBar = na
+var int xHighBar = na
+var int xLowBar = na
+
+var float protectedHigh = na
+var float protectedLow = na
+
+atr = ta.atr(14)
+tolerance = atr * eqTolATR
+
+// Pure helper: no global mutation.
+near(float a, float b, float tol) =>
+    not na(a) and not na(b) and math.abs(a - b) <= tol
+
+//=============================================================================\n// EVENT LOG\n//=============================================================================\n
+// Keep the event log bounded. This block intentionally performs the mutation\n// in main scope rather than inside a function.\naddEvent = false
+addEventText = ""
+
+//=============================================================================\n// CONFIRMED PIVOTS\n//=============================================================================\n
+iPH = ta.pivothigh(high, internalLen, internalLen)
+iPL = ta.pivotlow(low, internalLen, internalLen)
+xPH = ta.pivothigh(high, externalLen, externalLen)
+xPL = ta.pivotlow(low, externalLen, externalLen)
+
+// Internal high
+if not na(iPH)
+    pivotBar = bar_index - internalLen
+    cls = na(iHigh) ? "HIGH" : iPH > iHigh ? "HH" : "LH"
+    iHigh := iPH
+    iHighBar := pivotBar
+
+    duplicate = false
+    if array.size(liquidity) > 0
+        for n = 0 to array.size(liquidity) - 1
+            q = array.get(liquidity, n)
+            if q.active and q.buySide and near(q.price, iPH, tolerance)
+                duplicate := true
+                break
+
+    if not duplicate and array.size(liquidity) < maxLiquidity
+        array.push(liquidity, Liquidity.new(nextLiquidityId, iPH, true, true, false, pivotBar, na, "INTERNAL_" + cls))
+        nextLiquidityId += 1
+
+// Internal low
+if not na(iPL)
+    pivotBar = bar_index - internalLen
+    cls = na(iLow) ? "LOW" : iPL > iLow ? "HL" : "LL"
+    iLow := iPL
+    iLowBar := pivotBar
+
+    duplicate = false
+    if array.size(liquidity) > 0
+        for n = 0 to array.size(liquidity) - 1
+            q = array.get(liquidity, n)
+            if q.active and not q.buySide and near(q.price, iPL, tolerance)
+                duplicate := true
+                break
+
+    if not duplicate and array.size(liquidity) < maxLiquidity
+        array.push(liquidity, Liquidity.new(nextLiquidityId, iPL, false, true, false, pivotBar, na, "INTERNAL_" + cls))
+        nextLiquidityId += 1
+
+// External high
+if not na(xPH)
+    pivotBar = bar_index - externalLen
+    cls = na(xHigh) ? "HIGH" : xPH > xHigh ? "HH" : "LH"
+    xHigh := xPH
+    xHighBar := pivotBar
+
+    duplicate = false
+    if array.size(liquidity) > 0
+        for n = 0 to array.size(liquidity) - 1
+            q = array.get(liquidity, n)
+            if q.active and q.buySide and near(q.price, xPH, tolerance)
+                duplicate := true
+                break
+
+    if not duplicate and array.size(liquidity) < maxLiquidity
+        array.push(liquidity, Liquidity.new(nextLiquidityId, xPH, true, true, false, pivotBar, na, "EXTERNAL_" + cls))
+        nextLiquidityId += 1
+
+// External low
+if not na(xPL)
+    pivotBar = bar_index - externalLen
+    cls = na(xLow) ? "LOW" : xPL > xLow ? "HL" : "LL"
+    xLow := xPL
+    xLowBar := pivotBar
+
+    duplicate = false
+    if array.size(liquidity) > 0
+        for n = 0 to array.size(liquidity) - 1
+            q = array.get(liquidity, n)
+            if q.active and not q.buySide and near(q.price, xPL, tolerance)
+                duplicate := true
+                break
+
+    if not duplicate and array.size(liquidity) < maxLiquidity
+        array.push(liquidity, Liquidity.new(nextLiquidityId, xPL, false, true, false, pivotBar, na, "EXTERNAL_" + cls))
+        nextLiquidityId += 1
+
+//=============================================================================\n// STRUCTURE BREAKS — CONFIRMED CLOSE ONLY\n//=============================================================================\n
+internalBull = barstate.isconfirmed and not na(iHigh) and close > iHigh
+internalBear = barstate.isconfirmed and not na(iLow) and close < iLow
+externalBull = barstate.isconfirmed and not na(xHigh) and close > xHigh
+externalBear = barstate.isconfirmed and not na(xLow) and close < xLow
+
+if internalBull
+    old = internalBias
+    internalBias := "BULLISH"
+    lastStructure := old == "BEARISH" ? "iMSS_BULLISH" : "iBOS_BULLISH"
+    protectedLow := iLow
+    if array.size(events) < 8
+        array.unshift(events, lastStructure)
+    else
+        array.unshift(events, lastStructure)
+        array.pop(events)
+
+if internalBear
+    old = internalBias
+    internalBias := "BEARISH"
+    lastStructure := old == "BULLISH" ? "iMSS_BEARISH" : "iBOS_BEARISH"
+    protectedHigh := iHigh
+    if array.size(events) < 8
+        array.unshift(events, lastStructure)
+    else
+        array.unshift(events, lastStructure)
+        array.pop(events)
+
+if externalBull
+    old = externalBias
+    externalBias := "BULLISH"
+    lastStructure := old == "BEARISH" ? "xMSS_BULLISH" : "xBOS_BULLISH"
+    protectedLow := xLow
+    if array.size(events) < 8
+        array.unshift(events, lastStructure)
+    else
+        array.unshift(events, lastStructure)
+        array.pop(events)
+
+if externalBear
+    old = externalBias
+    externalBias := "BEARISH"
+    lastStructure := old == "BULLISH" ? "xMSS_BEARISH" : "xBOS_BEARISH"
+    protectedHigh := xHigh
+    if array.size(events) < 8
+        array.unshift(events, lastStructure)
+    else
+        array.unshift(events, lastStructure)
+        array.pop(events)
+
+//=============================================================================\n// REFERENCE LIQUIDITY — NON-LOOKAHEAD\n//=============================================================================\n
+pdh = request.security(syminfo.tickerid, "D", high[1], lookahead=barmerge.lookahead_off)
+pdl = request.security(syminfo.tickerid, "D", low[1], lookahead=barmerge.lookahead_off)
+pwh = request.security(syminfo.tickerid, "W", high[1], lookahead=barmerge.lookahead_off)
+pwl = request.security(syminfo.tickerid, "W", low[1], lookahead=barmerge.lookahead_off)
+pmh = request.security(syminfo.tickerid, "M", high[1], lookahead=barmerge.lookahead_off)
+pml = request.security(syminfo.tickerid, "M", low[1], lookahead=barmerge.lookahead_off)
+
+// Reference levels are displayed now. Their explicit lifecycle registration\n// will be tightened in the next P01 revision so each period gets a unique ID.
+
+//=============================================================================\n// LIQUIDITY SWEEPS\n//=============================================================================\n
+bool sslSweep = false
+bool bslSweep = false
+float sweepPrice = na
+string sweepSource = "NONE"
+
+if barstate.isconfirmed and array.size(liquidity) > 0
+    for n = 0 to array.size(liquidity) - 1
+        q = array.get(liquidity, n)
+
+        if q.active and not q.swept
+            buySweep = q.buySide and high > q.price and close < q.price
+            sellSweep = not q.buySide and low < q.price and close > q.price
+
+            if buySweep or sellSweep
+                q.active := false
+                q.swept := true
+                q.sweptBar := bar_index
+                array.set(liquidity, n, q)
+
+                sweepPrice := q.price
+                sweepSource := q.source
+
+                if buySweep
+                    bslSweep := true
+                    engineState := "WAIT_DISPLACEMENT"
+                    rejection := "NONE"
+                    array.unshift(events, "BSL_SWEPT " + q.source)
+                else
+                    sslSweep := true
+                    engineState := "WAIT_DISPLACEMENT"
+                    rejection := "NONE"
+                    array.unshift(events, "SSL_SWEPT " + q.source)
+
+                if array.size(events) > 8
+                    array.pop(events)
+
+                array.push(setups, Setup.new(nextSetupId, true, sellSweep, bar_index, bar_index + 20, "WAIT_DISPLACEMENT", nextLiquidityEventId, "NONE"))
+                nextSetupId += 1
+                nextLiquidityEventId += 1
+
+//=============================================================================\n// SETUP EXPIRY\n//=============================================================================\n
+if array.size(setups) > 0
+    for n = 0 to array.size(setups) - 1
+        s = array.get(setups, n)
+        if s.active and bar_index > s.expiryBar
+            s.active := false
+            s.state := "EXPIRED"
+            s.rejection := "SWEEP_EXPIRED"
+            array.set(setups, n, s)
+
+            if array.size(events) >= 8
+                array.pop(events)
+            array.unshift(events, "SETUP_EXPIRED #" + str.tostring(s.id))
+            engineState := "EXPIRED"
+            rejection := "SWEEP_EXPIRED"
+
+//=============================================================================\n// VISUALIZATION\n//=============================================================================\n
+plotshape(showInternal and not na(iPH), title="Internal pivot high", style=shape.circle, location=location.abovebar, offset=-internalLen, size=size.tiny)
+plotshape(showInternal and not na(iPL), title="Internal pivot low", style=shape.circle, location=location.belowbar, offset=-internalLen, size=size.tiny)
+plotshape(showExternal and not na(xPH), title="External pivot high", style=shape.diamond, location=location.abovebar, offset=-externalLen, size=size.tiny)
+plotshape(showExternal and not na(xPL), title="External pivot low", style=shape.diamond, location=location.belowbar, offset=-externalLen, size=size.tiny)
+
+plotshape(showStructure and internalBull, title="Internal bullish break", style=shape.labelup, location=location.belowbar, size=size.tiny, text="iBOS")
+plotshape(showStructure and internalBear, title="Internal bearish break", style=shape.labeldown, location=location.abovebar, size=size.tiny, text="iBOS")
+plotshape(showStructure and externalBull, title="External bullish break", style=shape.labelup, location=location.belowbar, size=size.small, text="xBOS")
+plotshape(showStructure and externalBear, title="External bearish break", style=shape.labeldown, location=location.abovebar, size=size.small, text="xBOS")
+
+plotshape(showSweeps and sslSweep, title="Sell-side liquidity sweep", style=shape.labelup, location=location.belowbar, size=size.small, text="SSL")
+plotshape(showSweeps and bslSweep, title="Buy-side liquidity sweep", style=shape.labeldown, location=location.abovebar, size=size.small, text="BSL")
+
+plot(usePD ? pdh : na, title="PDH")
+plot(usePD ? pdl : na, title="PDL")
+plot(usePW ? pwh : na, title="PWH")
+plot(usePW ? pwl : na, title="PWL")
+plot(usePM ? pmh : na, title="PMH")
+plot(usePM ? pml : na, title="PML")
+
+//=============================================================================\n// DIAGNOSTIC PANEL\n//=============================================================================\n
+var table panel = table.new(position.top_right, 2, 14)
+
+if barstate.islast
+    if diagnostic
+        table.cell(panel, 0, 0, "ARTHA P01")
+        table.cell(panel, 1, 0, "DIAGNOSTIC")
+        table.cell(panel, 0, 1, "Internal bias")
+        table.cell(panel, 1, 1, internalBias)
+        table.cell(panel, 0, 2, "External bias")
+        table.cell(panel, 1, 2, externalBias)
+        table.cell(panel, 0, 3, "Last structure")
+        table.cell(panel, 1, 3, lastStructure)
+        table.cell(panel, 0, 4, "Engine state")
+        table.cell(panel, 1, 4, engineState)
+        table.cell(panel, 0, 5, "Rejection")
+        table.cell(panel, 1, 5, rejection)
+        table.cell(panel, 0, 6, "Liquidity objects")
+        table.cell(panel, 1, 6, str.tostring(array.size(liquidity)))
+        table.cell(panel, 0, 7, "Setups")
+        table.cell(panel, 1, 7, str.tostring(array.size(setups)))
+        table.cell(panel, 0, 8, "Pivot audit")
+        table.cell(panel, 1, 8, "Internal + external confirmed")
+        table.cell(panel, 0, 9, "Latest events")
+        table.cell(panel, 1, 9, "")
+
+        rows = math.min(array.size(events), 4)
+        for r = 0 to rows - 1
+            table.cell(panel, 0, 10 + r, str.tostring(r + 1))
+            table.cell(panel, 1, 10 + r, array.get(events, r))
+    else
+        table.clear(panel, 0, 0, 1, 13)
+
+//=============================================================================\n// ALERTS\n//=============================================================================\n
+alertcondition(internalBull, "ARTHA iBOS Bullish", "ARTHA internal bullish structure break")
+alertcondition(internalBear, "ARTHA iBOS Bearish", "ARTHA internal bearish structure break")
+alertcondition(externalBull, "ARTHA xBOS Bullish", "ARTHA external bullish structure break")
+alertcondition(externalBear, "ARTHA xBOS Bearish", "ARTHA external bearish structure break")
+alertcondition(sslSweep, "ARTHA SSL Sweep", "ARTHA sell-side liquidity sweep")
+alertcondition(bslSweep, "ARTHA BSL Sweep", "ARTHA buy-side liquidity sweep")
