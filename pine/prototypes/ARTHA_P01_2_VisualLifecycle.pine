@@ -1,0 +1,360 @@
+//@version=6
+indicator("ARTHA P01.2 — Structure + Liquidity", overlay=true, max_labels_count=500, max_lines_count=500)
+
+// P01.2 visual rules:
+// 1. Reference levels are line objects, not plots, so period transitions do not
+//    create vertical connector artifacts.
+// 2. Reference lines begin when their reference period becomes active and stop
+//    when liquidity is swept or the next reference period replaces them.
+// 3. Every reference line has a compact text label.
+// 4. Structure events use text-only labels (no label boxes).
+// 5. Hiding drawings never disables the underlying engine.
+// 6. Only confirmed bars can commit sweeps and structure events.
+
+//=============================================================================
+// INPUTS
+//=============================================================================
+string GS = "01 — Structure"
+int iStrength = input.int(2, "Internal Pivot Strength", minval=1, group=GS)
+int xStrength = input.int(5, "External Pivot Strength", minval=2, group=GS)
+bool showInternal = input.bool(false, "Show Internal Pivots", group=GS)
+bool showExternal = input.bool(false, "Show External Pivots", group=GS)
+bool showStructure = input.bool(true, "Show Structure Text", group=GS)
+
+string GL = "02 — Liquidity"
+float eqAtr = input.float(0.10, "EQ tolerance (ATR)", minval=0.01, step=0.01, group=GL)
+bool showLiquidity = input.bool(true, "Show Liquidity", group=GL)
+bool showSweeps = input.bool(true, "Show Sweep Text", group=GL)
+
+string GR = "03 — Previous D/W/M Liquidity"
+bool usePD = input.bool(true, "Previous Day", group=GR)
+bool usePW = input.bool(true, "Previous Week", group=GR)
+bool usePM = input.bool(true, "Previous Month", group=GR)
+
+string GD = "04 — Diagnostics"
+bool diagnostic = input.bool(false, "Diagnostic Mode", group=GD)
+
+//=============================================================================
+// CORE SERIES
+//=============================================================================
+float atr = ta.atr(14)
+float tol = atr * eqAtr
+
+int dayTime = time("D")
+int weekTime = time("W")
+int monthTime = time("M")
+
+bool newDay = ta.change(dayTime) != 0
+bool newWeek = ta.change(weekTime) != 0
+bool newMonth = ta.change(monthTime) != 0
+
+//=============================================================================
+// CONFIRMED PIVOTS / STRUCTURE
+//=============================================================================
+float iPH = ta.pivothigh(high, iStrength, iStrength)
+float iPL = ta.pivotlow(low, iStrength, iStrength)
+float xPH = ta.pivothigh(high, xStrength, xStrength)
+float xPL = ta.pivotlow(low, xStrength, xStrength)
+
+var float lastIHigh = na
+var float lastILow = na
+var float lastXHigh = na
+var float lastXLow = na
+var string iBias = "NEUTRAL"
+var string xBias = "NEUTRAL"
+var string lastStructure = "NONE"
+
+string iHighClass = na(iPH) ? "" : na(lastIHigh) ? "H" : iPH > lastIHigh ? "HH" : "LH"
+string iLowClass = na(iPL) ? "" : na(lastILow) ? "L" : iPL > lastILow ? "HL" : "LL"
+string xHighClass = na(xPH) ? "" : na(lastXHigh) ? "H" : xPH > lastXHigh ? "HH" : "LH"
+string xLowClass = na(xPL) ? "" : na(lastXLow) ? "L" : xPL > lastXLow ? "HL" : "LL"
+
+if not na(iPH)
+    lastIHigh := iPH
+if not na(iPL)
+    lastILow := iPL
+if not na(xPH)
+    lastXHigh := xPH
+if not na(xPL)
+    lastXLow := xPL
+
+// The level that is being broken must have existed before this bar.
+// A pivot confirmed on this bar is therefore not eligible as a break target
+// until a later bar.
+var int lastIBrokenHighBar = na
+var int lastIBrokenLowBar = na
+var int lastXBrokenHighBar = na
+var int lastXBrokenLowBar = na
+
+bool iBullBreak = barstate.isconfirmed and not na(lastIHigh) and close > lastIHigh and lastIBrokenHighBar != bar_index
+bool iBearBreak = barstate.isconfirmed and not na(lastILow) and close < lastILow and lastIBrokenLowBar != bar_index
+bool xBullBreak = barstate.isconfirmed and not na(lastXHigh) and close > lastXHigh and lastXBrokenHighBar != bar_index
+bool xBearBreak = barstate.isconfirmed and not na(lastXLow) and close < lastXLow and lastXBrokenLowBar != bar_index
+
+if iBullBreak
+    lastIBrokenHighBar := bar_index
+    lastStructure := iBias == "BEARISH" ? "iMSS↑" : "iBOS↑"
+    iBias := "BULLISH"
+if iBearBreak
+    lastIBrokenLowBar := bar_index
+    lastStructure := iBias == "BULLISH" ? "iMSS↓" : "iBOS↓"
+    iBias := "BEARISH"
+if xBullBreak
+    lastXBrokenHighBar := bar_index
+    lastStructure := xBias == "BEARISH" ? "xMSS↑" : "xBOS↑"
+    xBias := "BULLISH"
+if xBearBreak
+    lastXBrokenLowBar := bar_index
+    lastStructure := xBias == "BULLISH" ? "xMSS↓" : "xBOS↓"
+    xBias := "BEARISH"
+
+//=============================================================================
+// PREVIOUS PERIOD LEVELS
+//=============================================================================
+float pdh = request.security(syminfo.tickerid, "D", high[1], lookahead=barmerge.lookahead_off)
+float pdl = request.security(syminfo.tickerid, "D", low[1], lookahead=barmerge.lookahead_off)
+float pwh = request.security(syminfo.tickerid, "W", high[1], lookahead=barmerge.lookahead_off)
+float pwl = request.security(syminfo.tickerid, "W", low[1], lookahead=barmerge.lookahead_off)
+float pmh = request.security(syminfo.tickerid, "M", high[1], lookahead=barmerge.lookahead_off)
+float pml = request.security(syminfo.tickerid, "M", low[1], lookahead=barmerge.lookahead_off)
+
+//=============================================================================
+// LINE/LABEL HELPERS
+//=============================================================================
+// Functions only create/delete objects passed to them. They do not mutate
+// engine globals, avoiding Pine scope errors.
+makeLevelLine(int x1, float y, int x2, line oldLine, bool visible) =>
+    if not visible or na(y)
+        if not na(oldLine)
+            line.delete(oldLine)
+        line(na)
+    else
+        if not na(oldLine)
+            line.delete(oldLine)
+        line.new(x1, y, x2, y, xloc=xloc.bar_index)
+
+makeLevelLabel(int x, float y, string txt, label oldLabel, bool visible) =>
+    if not visible or na(y)
+        if not na(oldLabel)
+            label.delete(oldLabel)
+        label(na)
+    else
+        if not na(oldLabel)
+            label.delete(oldLabel)
+        label.new(x, y, txt, xloc=xloc.bar_index, style=label.style_none, textalign=text.align_left)
+
+//=============================================================================
+// REFERENCE LEVEL OBJECT STATE
+//=============================================================================
+var line pdhLine = na
+var line pdlLine = na
+var line pwhLine = na
+var line pwlLine = na
+var line pmhLine = na
+var line pmlLine = na
+
+var label pdhLabel = na
+var label pdlLabel = na
+var label pwhLabel = na
+var label pwlLabel = na
+var label pmhLabel = na
+var label pmlLabel = na
+
+var bool pdhActive = false
+var bool pdlActive = false
+var bool pwhActive = false
+var bool pwlActive = false
+var bool pmhActive = false
+var bool pmlActive = false
+
+// New reference period: previous period levels become active for the new
+// period. They are drawn from the start of the new period, not as plots that
+// connect one period's level to another.
+if newDay
+    pdhActive := usePD and not na(pdh)
+    pdlActive := usePD and not na(pdl)
+    if not na(pdhLine)
+        line.delete(pdhLine)
+    if not na(pdlLine)
+        line.delete(pdlLine)
+    if not na(pdhLabel)
+        label.delete(pdhLabel)
+    if not na(pdlLabel)
+        label.delete(pdlLabel)
+    pdhLine := pdhActive and showLiquidity ? line.new(bar_index, pdh, bar_index, pdh, xloc=xloc.bar_index) : na
+    pdlLine := pdlActive and showLiquidity ? line.new(bar_index, pdl, bar_index, pdl, xloc=xloc.bar_index) : na
+    pdhLabel := pdhActive and showLiquidity ? label.new(bar_index, pdh, "PDH", xloc=xloc.bar_index, style=label.style_none) : na
+    pdlLabel := pdlActive and showLiquidity ? label.new(bar_index, pdl, "PDL", xloc=xloc.bar_index, style=label.style_none) : na
+
+if newWeek
+    pwhActive := usePW and not na(pwh)
+    pwlActive := usePW and not na(pwl)
+    if not na(pwhLine)
+        line.delete(pwhLine)
+    if not na(pwlLine)
+        line.delete(pwlLine)
+    if not na(pwhLabel)
+        label.delete(pwhLabel)
+    if not na(pwlLabel)
+        label.delete(pwlLabel)
+    pwhLine := pwhActive and showLiquidity ? line.new(bar_index, pwh, bar_index, pwh, xloc=xloc.bar_index) : na
+    pwlLine := pwlActive and showLiquidity ? line.new(bar_index, pwl, bar_index, pwl, xloc=xloc.bar_index) : na
+    pwhLabel := pwhActive and showLiquidity ? label.new(bar_index, pwh, "PWH", xloc=xloc.bar_index, style=label.style_none) : na
+    pwlLabel := pwlActive and showLiquidity ? label.new(bar_index, pwl, "PWL", xloc=xloc.bar_index, style=label.style_none) : na
+
+if newMonth
+    pmhActive := usePM and not na(pmh)
+    pmlActive := usePM and not na(pml)
+    if not na(pmhLine)
+        line.delete(pmhLine)
+    if not na(pmlLine)
+        line.delete(pmlLine)
+    if not na(pmhLabel)
+        label.delete(pmhLabel)
+    if not na(pmlLabel)
+        label.delete(pmlLabel)
+    pmhLine := pmhActive and showLiquidity ? line.new(bar_index, pmh, bar_index, pmh, xloc=xloc.bar_index) : na
+    pmlLine := pmlActive and showLiquidity ? line.new(bar_index, pml, bar_index, pml, xloc=xloc.bar_index) : na
+    pmhLabel := pmhActive and showLiquidity ? label.new(bar_index, pmh, "PMH", xloc=xloc.bar_index, style=label.style_none) : na
+    pmlLabel := pmlActive and showLiquidity ? label.new(bar_index, pml, "PML", xloc=xloc.bar_index, style=label.style_none) : na
+
+// Extend only while the level remains active. The line never crosses into a
+// replacement period because it is deleted/recreated at period transition.
+if pdhActive and not na(pdhLine)
+    line.set_x2(pdhLine, bar_index)
+    if not na(pdhLabel)
+        label.set_x(pdhLabel, bar_index)
+if pdlActive and not na(pdlLine)
+    line.set_x2(pdlLine, bar_index)
+    if not na(pdlLabel)
+        label.set_x(pdlLabel, bar_index)
+if pwhActive and not na(pwhLine)
+    line.set_x2(pwhLine, bar_index)
+    if not na(pwhLabel)
+        label.set_x(pwhLabel, bar_index)
+if pwlActive and not na(pwlLine)
+    line.set_x2(pwlLine, bar_index)
+    if not na(pwlLabel)
+        label.set_x(pwlLabel, bar_index)
+if pmhActive and not na(pmhLine)
+    line.set_x2(pmhLine, bar_index)
+    if not na(pmhLabel)
+        label.set_x(pmhLabel, bar_index)
+if pmlActive and not na(pmlLine)
+    line.set_x2(pmlLine, bar_index)
+    if not na(pmlLabel)
+        label.set_x(pmlLabel, bar_index)
+
+//=============================================================================
+// CONFIRMED REFERENCE SWEEPS
+//=============================================================================
+bool pdhSweep = barstate.isconfirmed and pdhActive and high > pdh and close < pdh
+bool pdlSweep = barstate.isconfirmed and pdlActive and low < pdl and close > pdl
+bool pwhSweep = barstate.isconfirmed and pwhActive and high > pwh and close < pwh
+bool pwlSweep = barstate.isconfirmed and pwlActive and low < pwl and close > pwl
+bool pmhSweep = barstate.isconfirmed and pmhActive and high > pmh and close < pmh
+bool pmlSweep = barstate.isconfirmed and pmlActive and low < pml and close > pml
+
+// Once taken, remove the corresponding level and label. The engine retains
+// the sweep event via the booleans for this bar; later versions will store a
+// persistent LiquidityEvent object.
+if pdhSweep
+    pdhActive := false
+    if not na(pdhLine)
+        line.delete(pdhLine)
+        pdhLine := na
+    if not na(pdhLabel)
+        label.delete(pdhLabel)
+        pdhLabel := na
+if pdlSweep
+    pdlActive := false
+    if not na(pdlLine)
+        line.delete(pdlLine)
+        pdlLine := na
+    if not na(pdlLabel)
+        label.delete(pdlLabel)
+        pdlLabel := na
+if pwhSweep
+    pwhActive := false
+    if not na(pwhLine)
+        line.delete(pwhLine)
+        pwhLine := na
+    if not na(pwhLabel)
+        label.delete(pwhLabel)
+        pwhLabel := na
+if pwlSweep
+    pwlActive := false
+    if not na(pwlLine)
+        line.delete(pwlLine)
+        pwlLine := na
+    if not na(pwlLabel)
+        label.delete(pwlLabel)
+        pwlLabel := na
+if pmhSweep
+    pmhActive := false
+    if not na(pmhLine)
+        line.delete(pmhLine)
+        pmhLine := na
+    if not na(pmhLabel)
+        label.delete(pmhLabel)
+        pmhLabel := na
+if pmlSweep
+    pmlActive := false
+    if not na(pmlLine)
+        line.delete(pmlLine)
+        pmlLine := na
+    if not na(pmlLabel)
+        label.delete(pmlLabel)
+        pmlLabel := na
+
+//=============================================================================
+// TEXT-ONLY EVENTS
+//=============================================================================
+plotshape(showInternal and not na(iPH), title="Internal High", style=shape.circle, location=location.abovebar, offset=-iStrength, size=size.tiny)
+plotshape(showInternal and not na(iPL), title="Internal Low", style=shape.circle, location=location.belowbar, offset=-iStrength, size=size.tiny)
+plotshape(showExternal and not na(xPH), title="External High", style=shape.diamond, location=location.abovebar, offset=-xStrength, size=size.tiny)
+plotshape(showExternal and not na(xPL), title="External Low", style=shape.diamond, location=location.belowbar, offset=-xStrength, size=size.tiny)
+
+if showStructure and iBullBreak
+    label.new(bar_index, low, "iBOS↑", style=label.style_none, textalign=text.align_center)
+if showStructure and iBearBreak
+    label.new(bar_index, high, "iBOS↓", style=label.style_none, textalign=text.align_center)
+if showStructure and xBullBreak
+    label.new(bar_index, low, "xBOS↑", style=label.style_none, textalign=text.align_center)
+if showStructure and xBearBreak
+    label.new(bar_index, high, "xBOS↓", style=label.style_none, textalign=text.align_center)
+
+if showSweeps and (pdlSweep or pwlSweep or pmlSweep)
+    label.new(bar_index, low, "SSL SWEEP", style=label.style_none, textalign=text.align_center)
+if showSweeps and (pdhSweep or pwhSweep or pmhSweep)
+    label.new(bar_index, high, "BSL SWEEP", style=label.style_none, textalign=text.align_center)
+
+//=============================================================================
+// DIAGNOSTICS
+//=============================================================================
+var table t = table.new(position.top_right, 2, 9)
+if barstate.islast
+    if diagnostic
+        table.cell(t, 0, 0, "ARTHA P01.2")
+        table.cell(t, 1, 0, "ENGINE")
+        table.cell(t, 0, 1, "Internal bias")
+        table.cell(t, 1, 1, iBias)
+        table.cell(t, 0, 2, "External bias")
+        table.cell(t, 1, 2, xBias)
+        table.cell(t, 0, 3, "Last structure")
+        table.cell(t, 1, 3, lastStructure)
+        table.cell(t, 0, 4, "PDH/PDL")
+        table.cell(t, 1, 4, str.tostring(pdhActive) + " / " + str.tostring(pdlActive))
+        table.cell(t, 0, 5, "PWH/PWL")
+        table.cell(t, 1, 5, str.tostring(pwhActive) + " / " + str.tostring(pwlActive))
+        table.cell(t, 0, 6, "PMH/PML")
+        table.cell(t, 1, 6, str.tostring(pmhActive) + " / " + str.tostring(pmlActive))
+        table.cell(t, 0, 7, "Confirmed bar")
+        table.cell(t, 1, 7, barstate.isconfirmed ? "YES" : "NO")
+        table.cell(t, 0, 8, "Last sweep")
+        table.cell(t, 1, 8, pdlSweep ? "PDL" : pwlSweep ? "PWL" : pmlSweep ? "PML" : pdhSweep ? "PDH" : pwhSweep ? "PWH" : pmhSweep ? "PMH" : "NONE")
+    else
+        table.clear(t, 0, 0, 1, 8)
+
+alertcondition(pdlSweep or pwlSweep or pmlSweep, "ARTHA SSL Sweep", "Confirmed sell-side reference liquidity sweep.")
+alertcondition(pdhSweep or pwhSweep or pmhSweep, "ARTHA BSL Sweep", "Confirmed buy-side reference liquidity sweep.")
