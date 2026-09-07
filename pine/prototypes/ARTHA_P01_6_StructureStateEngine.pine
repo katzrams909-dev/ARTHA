@@ -1,0 +1,209 @@
+//@version=6
+indicator("ARTHA P01.6 — Structure State Engine", overlay=true, max_labels_count=500)
+
+// P01.6 defines the confirmed structure state used by later ARTHA engines.
+// It deliberately separates pivot confirmation, swing classification, break
+// events, protected structure, and displacement-qualified MSS.
+
+string G1="01 Structure"
+int iLen=input.int(2,"Internal pivot strength",minval=1,group=G1)
+int xLen=input.int(5,"External pivot strength",minval=2,group=G1)
+float minDispATR=input.float(0.75,"MSS displacement / ATR",minval=0.0,step=0.05,group=G1)
+bool closeBreak=input.bool(true,"Require close through structure",group=G1)
+
+string G2="02 Display"
+bool showEvents=input.bool(true,"Show structure text",group=G2)
+bool showSwings=input.bool(false,"Show swing labels",group=G2)
+
+atr=ta.atr(14)
+
+//================ CONFIRMED PIVOTS ================
+iPH=ta.pivothigh(high,iLen,iLen)
+iPL=ta.pivotlow(low,iLen,iLen)
+xPH=ta.pivothigh(high,xLen,xLen)
+xPL=ta.pivotlow(low,xLen,xLen)
+
+//================ SWING STATE ================
+var float iLastHigh=na
+var float iPrevHigh=na
+var float iLastLow=na
+var float iPrevLow=na
+var int iLastHighBar=na
+var int iLastLowBar=na
+var string iHighClass="NONE"
+var string iLowClass="NONE"
+
+var float xLastHigh=na
+var float xPrevHigh=na
+var float xLastLow=na
+var float xPrevLow=na
+var int xLastHighBar=na
+var int xLastLowBar=na
+var string xHighClass="NONE"
+var string xLowClass="NONE"
+
+if not na(iPH)
+    iPrevHigh:=iLastHigh
+    iLastHigh:=iPH
+    iLastHighBar:=bar_index-iLen
+    iHighClass:=na(iPrevHigh)?"HH":iLastHigh>iPrevHigh?"HH":"LH"
+if not na(iPL)
+    iPrevLow:=iLastLow
+    iLastLow:=iPL
+    iLastLowBar:=bar_index-iLen
+    iLowClass:=na(iPrevLow)?"HL":iLastLow>iPrevLow?"HL":"LL"
+
+if not na(xPH)
+    xPrevHigh:=xLastHigh
+    xLastHigh:=xPH
+    xLastHighBar:=bar_index-xLen
+    xHighClass:=na(xPrevHigh)?"HH":xLastHigh>xPrevHigh?"HH":"LH"
+if not na(xPL)
+    xPrevLow:=xLastLow
+    xLastLow:=xPL
+    xLastLowBar:=bar_index-xLen
+    xLowClass:=na(xPrevLow)?"HL":xLastLow>xPrevLow?"HL":"LL"
+
+//================ STRUCTURAL BIAS ================
+var int iTrend=0
+var int xTrend=0
+// Protected structures are the most recent opposing swing that established
+// the active directional state. They are not invalidated by wick-only sweeps.
+var float iProtectedLow=na
+var float iProtectedHigh=na
+var float xProtectedLow=na
+var float xProtectedHigh=na
+
+// Break tests occur only on confirmed bars. The previous structure event is
+// consumed after a break so repeated labels cannot fire on every later bar.
+var int iBrokenHighBar=na
+var int iBrokenLowBar=na
+var int xBrokenHighBar=na
+var int xBrokenLowBar=na
+
+bool iBullBreak=barstate.isconfirmed and not na(iLastHigh) and (closeBreak?close>iLastHigh:high>iLastHigh) and iLastHighBar!=iBrokenHighBar
+bool iBearBreak=barstate.isconfirmed and not na(iLastLow) and (closeBreak?close<iLastLow:low<iLastLow) and iLastLowBar!=iBrokenLowBar
+bool xBullBreak=barstate.isconfirmed and not na(xLastHigh) and (closeBreak?close>xLastHigh:high>xLastHigh) and xLastHighBar!=xBrokenHighBar
+bool xBearBreak=barstate.isconfirmed and not na(xLastLow) and (closeBreak?close<xLastLow:low<iLastLow) and xLastLowBar!=xBrokenLowBar
+
+// Capture the opposing swing as protected structure when a directional break
+// is confirmed. This is the level whose later confirmed break can change state.
+if iBullBreak
+    iBrokenHighBar:=iLastHighBar
+    iProtectedLow:=iLastLow
+    iTrend:=iTrend==-1?-2:1
+if iBearBreak
+    iBrokenLowBar:=iLastLowBar
+    iProtectedHigh:=iLastHigh
+    iTrend:=iTrend==1?2:-1
+if xBullBreak
+    xBrokenHighBar:=xLastHighBar
+    xProtectedLow:=xLastLow
+    xTrend:=xTrend==-1?-2:1
+if xBearBreak
+    xBrokenLowBar:=xLastLowBar
+    xProtectedHigh:=xLastHigh
+    xTrend:=xTrend==1?2:-1
+
+//================ DISPLACEMENT / MSS ================
+// MSS is intentionally stricter than CHoCH: a confirmed break against the
+// active trend must also show meaningful body displacement relative to ATR.
+body=math.abs(close-open)
+displacement=atr>0?body/atr:0.0
+bool iBullMSS=barstate.isconfirmed and iTrend<0 and not na(iLastHigh) and close>iLastHigh and displacement>=minDispATR
+bool iBearMSS=barstate.isconfirmed and iTrend>0 and not na(iLastLow) and close<iLastLow and displacement>=minDispATR
+bool xBullMSS=barstate.isconfirmed and xTrend<0 and not na(xLastHigh) and close>xLastHigh and displacement>=minDispATR
+bool xBearMSS=barstate.isconfirmed and xTrend>0 and not na(xLastLow) and close<xLastLow and displacement>=minDispATR
+
+// CHoCH is a confirmed break against the established trend without requiring
+// the stronger displacement criterion. MSS supersedes CHoCH on the same bar.
+iBullCH=barstate.isconfirmed and iTrend<0 and iBullBreak and not iBullMSS
+iBearCH=barstate.isconfirmed and iTrend>0 and iBearBreak and not iBearMSS
+xBullCH=barstate.isconfirmed and xTrend<0 and xBullBreak and not xBullMSS
+xBearCH=barstate.isconfirmed and xTrend>0 and xBearBreak and not xBearMSS
+
+// A break in the direction of the active trend is BOS. A first break from a
+// neutral state establishes trend but is labelled BOS for continuity.
+iBullBOS=iBullBreak and not iBullCH and not iBullMSS
+iBearBOS=iBearBreak and not iBearCH and not iBearMSS
+xBullBOS=xBullBreak and not xBullCH and not xBullMSS
+xBearBOS=xBearBreak and not xBearCH and not xBearMSS
+
+// State transition after classifying the event.
+if iBullCH or iBullMSS or iBullBOS
+    iTrend:=1
+if iBearCH or iBearMSS or iBearBOS
+    iTrend:=-1
+if xBullCH or xBullMSS or xBullBOS
+    xTrend:=1
+if xBearCH or xBearMSS or xBearBOS
+    xTrend:=-1
+
+//================ TEXT RENDERER ================
+if showSwings and not na(iPH)
+    label.new(bar_index-iLen,iPH,iHighClass,style=label.style_none)
+if showSwings and not na(iPL)
+    label.new(bar_index-iLen,iPL,iLowClass,style=label.style_none)
+if showSwings and not na(xPH)
+    label.new(bar_index-xLen,xPH,xHighClass,style=label.style_none)
+if showSwings and not na(xPL)
+    label.new(bar_index-xLen,xPL,xLowClass,style=label.style_none)
+
+if showEvents and iBullMSS
+    label.new(bar_index,low,"iMSS ↑",style=label.style_none)
+else if showEvents and iBullCH
+    label.new(bar_index,low,"iCHoCH ↑",style=label.style_none)
+else if showEvents and iBullBOS
+    label.new(bar_index,low,"iBOS ↑",style=label.style_none)
+
+if showEvents and iBearMSS
+    label.new(bar_index,high,"iMSS ↓",style=label.style_none)
+else if showEvents and iBearCH
+    label.new(bar_index,high,"iCHoCH ↓",style=label.style_none)
+else if showEvents and iBearBOS
+    label.new(bar_index,high,"iBOS ↓",style=label.style_none)
+
+if showEvents and xBullMSS
+    label.new(bar_index,low,"xMSS ↑",style=label.style_none)
+else if showEvents and xBullCH
+    label.new(bar_index,low,"xCHoCH ↑",style=label.style_none)
+else if showEvents and xBullBOS
+    label.new(bar_index,low,"xBOS ↑",style=label.style_none)
+
+if showEvents and xBearMSS
+    label.new(bar_index,high,"xMSS ↓",style=label.style_none)
+else if showEvents and xBearCH
+    label.new(bar_index,high,"xCHoCH ↓",style=label.style_none)
+else if showEvents and xBearBOS
+    label.new(bar_index,high,"xBOS ↓",style=label.style_none)
+
+//================ DIAGNOSTIC STATE ================
+string iState=iTrend==1?"BULLISH":iTrend==-1?"BEARISH":"NEUTRAL"
+string xState=xTrend==1?"BULLISH":xTrend==-1?"BEARISH":"NEUTRAL"
+var table t=table.new(position.top_right,2,8)
+if barstate.islast
+    table.clear(t,0,0,1,7)
+    if input.bool(false,"Diagnostic panel",group="03 Diagnostic")
+        table.cell(t,0,0,"P01.6")
+        table.cell(t,1,0,"STRUCTURE")
+        table.cell(t,0,1,"Internal")
+        table.cell(t,1,1,iState)
+        table.cell(t,0,2,"Internal swings")
+        table.cell(t,1,2,iHighClass+" / "+iLowClass)
+        table.cell(t,0,3,"Internal protected")
+        table.cell(t,1,3,str.tostring(iProtectedHigh)+" / "+str.tostring(iProtectedLow))
+        table.cell(t,0,4,"External")
+        table.cell(t,1,4,xState)
+        table.cell(t,0,5,"External swings")
+        table.cell(t,1,5,xHighClass+" / "+xLowClass)
+        table.cell(t,0,6,"Displacement")
+        table.cell(t,1,6,str.tostring(displacement,"#.##"))
+        table.cell(t,0,7,"Confirmed")
+        table.cell(t,1,7,barstate.isconfirmed?"YES":"NO")
+
+alertcondition(iBullBOS or xBullBOS,"ARTHA Bullish BOS","Confirmed bullish BOS")
+alertcondition(iBearBOS or xBearBOS,"ARTHA Bearish BOS","Confirmed bearish BOS")
+alertcondition(iBullCH or xBullCH,"ARTHA Bullish CHoCH","Confirmed bullish CHoCH")
+alertcondition(iBearCH or xBearCH,"ARTHA Bearish CHoCH","Confirmed bearish CHoCH")
+alertcondition(iBullMSS or xBullMSS,"ARTHA Bullish MSS","Confirmed bullish MSS")
+alertcondition(iBearMSS or xBearMSS,"ARTHA Bearish MSS","Confirmed bearish MSS")
