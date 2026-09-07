@@ -18,13 +18,11 @@ bool showDiagnostics=input.bool(false,"Diagnostic panel",group=G2)
 
 atr=ta.atr(14)
 
-//================ CONFIRMED PIVOTS ================
 iPH=ta.pivothigh(high,iLen,iLen)
 iPL=ta.pivotlow(low,iLen,iLen)
 xPH=ta.pivothigh(high,xLen,xLen)
 xPL=ta.pivotlow(low,xLen,xLen)
 
-//================ SWING STATE ================
 var float iLastHigh=na
 var float iPrevHigh=na
 var float iLastLow=na
@@ -63,7 +61,6 @@ if not na(xPL)
     xLastLowBar:=bar_index-xLen
     xLowClass:=na(xPrevLow)?"HL":xLastLow>xPrevLow?"HL":"LL"
 
-//================ STRUCTURAL STATE ================
 var int iTrend=0
 var int xTrend=0
 var float iProtectedLow=na
@@ -78,14 +75,12 @@ var int xBrokenLowBar=na
 body=math.abs(close-open)
 displacement=atr>0?body/atr:0.0
 
-// Break conditions are calculated before any trend update.
+// All break tests are evaluated before trend mutation.
 bool iBullBreak=barstate.isconfirmed and not na(iLastHigh) and (closeBreak?close>iLastHigh:high>iLastHigh) and iLastHighBar!=iBrokenHighBar
 bool iBearBreak=barstate.isconfirmed and not na(iLastLow) and (closeBreak?close<iLastLow:low<iLastLow) and iLastLowBar!=iBrokenLowBar
 bool xBullBreak=barstate.isconfirmed and not na(xLastHigh) and (closeBreak?close>xLastHigh:high>xLastHigh) and xLastHighBar!=xBrokenHighBar
 bool xBearBreak=barstate.isconfirmed and not na(xLastLow) and (closeBreak?close<xLastLow:low<xLastLow) and xLastLowBar!=xBrokenLowBar
 
-// CHoCH = confirmed break against the established trend.
-// MSS = CHoCH-strength break with ATR-qualified body displacement.
 bool iBullAgainst=iTrend<0 and iBullBreak
 bool iBearAgainst=iTrend>0 and iBearBreak
 bool xBullAgainst=xTrend<0 and xBullBreak
@@ -99,30 +94,24 @@ bool iBearCH=iBearAgainst and not iBearMSS
 bool xBullCH=xBullAgainst and not xBullMSS
 bool xBearCH=xBearAgainst and not xBearMSS
 
-// A break in the direction of established trend, or a first neutral break,
-// is BOS. A reversal break is already classified as CHoCH/MSS above.
+// Neutral or trend-continuation breaks are BOS; reversal breaks are CHoCH/MSS.
 bool iBullBOS=iBullBreak and not iBullAgainst
 bool iBearBOS=iBearBreak and not iBearAgainst
 bool xBullBOS=xBullBreak and not xBullAgainst
 bool xBearBOS=xBearBreak and not xBearAgainst
 
-// Mutate state only AFTER event classification.
 if iBullBreak
     iBrokenHighBar:=iLastHighBar
-    if not na(iLastLow)
-        iProtectedLow:=iLastLow
+    iProtectedLow:=iLastLow
 if iBearBreak
     iBrokenLowBar:=iLastLowBar
-    if not na(iLastHigh)
-        iProtectedHigh:=iLastHigh
+    iProtectedHigh:=iLastHigh
 if xBullBreak
     xBrokenHighBar:=xLastHighBar
-    if not na(xLastLow)
-        xProtectedLow:=xLastLow
+    xProtectedLow:=xLastLow
 if xBearBreak
     xBrokenLowBar:=xLastLowBar
-    if not na(xLastHigh)
-        xProtectedHigh:=xLastHigh
+    xProtectedHigh:=xLastHigh
 
 if iBullBOS or iBullCH or iBullMSS
     iTrend:=1
@@ -134,43 +123,47 @@ if xBearBOS or xBearCH or xBearMSS
     xTrend:=-1
 
 //================ TEXT RENDERER ================
+// Explicit textcolor is used because label.style_none otherwise inherits a
+// theme-dependent color and can appear absent on some TradingView themes.
 if showSwings and not na(iPH)
-    label.new(bar_index-iLen,iPH,iHighClass,style=label.style_none)
+    label.new(bar_index-iLen,iPH,iHighClass,style=label.style_none,textcolor=color.white,size=size.tiny)
 if showSwings and not na(iPL)
-    label.new(bar_index-iLen,iPL,iLowClass,style=label.style_none)
+    label.new(bar_index-iLen,iPL,iLowClass,style=label.style_none,textcolor=color.white,size=size.tiny)
 if showSwings and not na(xPH)
-    label.new(bar_index-xLen,xPH,xHighClass,style=label.style_none)
+    label.new(bar_index-xLen,xPH,xHighClass,style=label.style_none,textcolor=color.white,size=size.tiny)
 if showSwings and not na(xPL)
-    label.new(bar_index-xLen,xPL,xLowClass,style=label.style_none)
+    label.new(bar_index-xLen,xPL,xLowClass,style=label.style_none,textcolor=color.white,size=size.tiny)
 
 if showEvents and iBullMSS
-    label.new(bar_index,low,"iMSS ↑",style=label.style_none)
+    label.new(bar_index,low,"iMSS ↑",style=label.style_none,textcolor=color.white,size=size.small)
 else if showEvents and iBullCH
-    label.new(bar_index,low,"iCHoCH ↑",style=label.style_none)
+    label.new(bar_index,low,"iCHoCH ↑",style=label.style_none,textcolor=color.white,size=size.small)
 else if showEvents and iBullBOS
-    label.new(bar_index,low,"iBOS ↑",style=label.style_none)
+    label.new(bar_index,low,"iBOS ↑",style=label.style_none,textcolor=color.white,size=size.small)
 if showEvents and iBearMSS
-    label.new(bar_index,high,"iMSS ↓",style=label.style_none)
+    label.new(bar_index,high,"iMSS ↓",style=label.style_none,textcolor=color.white,size=size.small)
 else if showEvents and iBearCH
-    label.new(bar_index,high,"iCHoCH ↓",style=label.style_none)
+    label.new(bar_index,high,"iCHoCH ↓",style=label.style_none,textcolor=color.white,size=size.small)
 else if showEvents and iBearBOS
-    label.new(bar_index,high,"iBOS ↓",style=label.style_none)
+    label.new(bar_index,high,"iBOS ↓",style=label.style_none,textcolor=color.white,size=size.small)
 if showEvents and xBullMSS
-    label.new(bar_index,low,"xMSS ↑",style=label.style_none)
+    label.new(bar_index,low,"xMSS ↑",style=label.style_none,textcolor=color.white,size=size.small)
 else if showEvents and xBullCH
-    label.new(bar_index,low,"xCHoCH ↑",style=label.style_none)
+    label.new(bar_index,low,"xCHoCH ↑",style=label.style_none,textcolor=color.white,size=size.small)
 else if showEvents and xBullBOS
-    label.new(bar_index,low,"xBOS ↑",style=label.style_none)
+    label.new(bar_index,low,"xBOS ↑",style=label.style_none,textcolor=color.white,size=size.small)
 if showEvents and xBearMSS
-    label.new(bar_index,high,"xMSS ↓",style=label.style_none)
+    label.new(bar_index,high,"xMSS ↓",style=label.style_none,textcolor=color.white,size=size.small)
 else if showEvents and xBearCH
-    label.new(bar_index,high,"xCHoCH ↓",style=label.style_none)
+    label.new(bar_index,high,"xCHoCH ↓",style=label.style_none,textcolor=color.white,size=size.small)
 else if showEvents and xBearBOS
-    label.new(bar_index,high,"xBOS ↓",style=label.style_none)
+    label.new(bar_index,high,"xBOS ↓",style=label.style_none,textcolor=color.white,size=size.small)
 
 //================ DIAGNOSTICS ================
 string iState=iTrend==1?"BULLISH":iTrend==-1?"BEARISH":"NEUTRAL"
 string xState=xTrend==1?"BULLISH":xTrend==-1?"BEARISH":"NEUTRAL"
+string iEvent=iBullMSS?"BULL MSS":iBearMSS?"BEAR MSS":iBullCH?"BULL CHoCH":iBearCH?"BEAR CHoCH":iBullBOS?"BULL BOS":iBearBOS?"BEAR BOS":"NONE"
+string xEvent=xBullMSS?"BULL MSS":xBearMSS?"BEAR MSS":xBullCH?"BULL CHoCH":xBearCH?"BEAR CHoCH":xBullBOS?"BULL BOS":xBearBOS?"BEAR BOS":"NONE"
 var table t=table.new(position.top_right,2,10)
 if barstate.islast
     table.clear(t,0,0,1,9)
@@ -190,9 +183,9 @@ if barstate.islast
         table.cell(t,0,6,"Displacement")
         table.cell(t,1,6,str.tostring(displacement,"#.##"))
         table.cell(t,0,7,"i event")
-        table.cell(t,1,7,iBullMSS?"BULL MSS":iBearMSS?"BEAR MSS":iBullCH?"BULL CHoCH":iBearCH?"BEAR CHoCH":iBullBOS?"BULL BOS":iBearBOS?"BEAR BOS":"NONE")
+        table.cell(t,1,7,iEvent)
         table.cell(t,0,8,"x event")
-        table.cell(t,1,8,xBullMSS?"BULL MSS":xBearMSS?"BEAR MSS":xBullCH?"BULL CHoCH":xBearCH?"BEAR CHoCH":xBullBOS?"BULL BOS":xBearBOS?"BEAR BOS":"NONE")
+        table.cell(t,1,8,xEvent)
         table.cell(t,0,9,"Confirmed")
         table.cell(t,1,9,barstate.isconfirmed?"YES":"NO")
 
