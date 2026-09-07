@@ -1,0 +1,211 @@
+//@version=6
+indicator("ARTHA P01.5 — Text-Only Renderer", overlay=true, max_lines_count=500, max_labels_count=500)
+
+// P01.5 preserves the P01.4 calculation foundation while replacing the
+// generic TradingView boxed event markers with lightweight text objects.
+// Structure semantics remain provisional until the full structure state
+// machine is implemented.
+
+string G1="01 Structure"
+int iStrength=input.int(2,"Internal pivot strength",minval=1,group=G1)
+int xStrength=input.int(5,"External pivot strength",minval=2,group=G1)
+bool showStructure=input.bool(false,"Show structure text",group=G1)
+
+string G2="02 Liquidity"
+bool usePD=input.bool(true,"Previous Day",group=G2)
+bool usePW=input.bool(true,"Previous Week",group=G2)
+bool usePM=input.bool(true,"Previous Month",group=G2)
+bool showLiquidity=input.bool(true,"Show active liquidity",group=G2)
+bool showLevelText=input.bool(true,"Show level text",group=G2)
+bool showSweeps=input.bool(true,"Show sweep text",group=G2)
+
+string G3="03 Display"
+string displayMode=input.string("CLEAN","Display mode",options=["CLEAN","ANALYSIS","DIAGNOSTIC"],group=G3)
+bool diagnostic=displayMode=="DIAGNOSTIC"
+
+// Confirmed structure pivots.
+iPH=ta.pivothigh(high,iStrength,iStrength)
+iPL=ta.pivotlow(low,iStrength,iStrength)
+xPH=ta.pivothigh(high,xStrength,xStrength)
+xPL=ta.pivotlow(low,xStrength,xStrength)
+var float lastIHigh=na
+var float lastILow=na
+var float lastXHigh=na
+var float lastXLow=na
+var string iBias="NEUTRAL"
+var string xBias="NEUTRAL"
+if not na(iPH)
+    lastIHigh:=iPH
+if not na(iPL)
+    lastILow:=iPL
+if not na(xPH)
+    lastXHigh:=xPH
+if not na(xPL)
+    lastXLow:=xPL
+
+iBullBreak=barstate.isconfirmed and not na(lastIHigh) and close>lastIHigh
+iBearBreak=barstate.isconfirmed and not na(lastILow) and close<lastILow
+xBullBreak=barstate.isconfirmed and not na(lastXHigh) and close>lastXHigh
+xBearBreak=barstate.isconfirmed and not na(lastXLow) and close<lastXLow
+string iBullText=iBias=="BEARISH"?"iCHoCH ↑":"iBOS ↑"
+string iBearText=iBias=="BULLISH"?"iCHoCH ↓":"iBOS ↓"
+string xBullText=xBias=="BEARISH"?"xCHoCH ↑":"xBOS ↑"
+string xBearText=xBias=="BULLISH"?"xCHoCH ↓":"xBOS ↓"
+if iBullBreak
+    iBias:="BULLISH"
+if iBearBreak
+    iBias:="BEARISH"
+if xBullBreak
+    xBias:="BULLISH"
+if xBearBreak
+    xBias:="BEARISH"
+
+// Stable previous completed D/W/M values.
+pdH=request.security(syminfo.tickerid,"D",high[1],lookahead=barmerge.lookahead_on)
+pdL=request.security(syminfo.tickerid,"D",low[1],lookahead=barmerge.lookahead_on)
+pwH=request.security(syminfo.tickerid,"W",high[1],lookahead=barmerge.lookahead_on)
+pwL=request.security(syminfo.tickerid,"W",low[1],lookahead=barmerge.lookahead_on)
+pmH=request.security(syminfo.tickerid,"M",high[1],lookahead=barmerge.lookahead_on)
+pmL=request.security(syminfo.tickerid,"M",low[1],lookahead=barmerge.lookahead_on)
+newDay=ta.change(time("D"))!=0
+newWeek=ta.change(time("W"))!=0
+newMonth=ta.change(time("M"))!=0
+var bool pdHA=true
+var bool pdLA=true
+var bool pwHA=true
+var bool pwLA=true
+var bool pmHA=true
+var bool pmLA=true
+if barstate.isfirst
+    pdHA:=usePD and not na(pdH)
+    pdLA:=usePD and not na(pdL)
+    pwHA:=usePW and not na(pwH)
+    pwLA:=usePW and not na(pwL)
+    pmHA:=usePM and not na(pmH)
+    pmLA:=usePM and not na(pmL)
+if newDay
+    pdHA:=usePD and not na(pdH)
+    pdLA:=usePD and not na(pdL)
+if newWeek
+    pwHA:=usePW and not na(pwH)
+    pwLA:=usePW and not na(pwL)
+if newMonth
+    pmHA:=usePM and not na(pmH)
+    pmLA:=usePM and not na(pmL)
+
+pdHSweep=barstate.isconfirmed and pdHA and high>pdH and close<pdH
+pdLSweep=barstate.isconfirmed and pdLA and low<pdL and close>pdL
+pwHSweep=barstate.isconfirmed and pwHA and high>pwH and close<pwH
+pwLSweep=barstate.isconfirmed and pwLA and low<pwL and close>pwL
+pmHSweep=barstate.isconfirmed and pmHA and high>pmH and close<pmH
+pmLSweep=barstate.isconfirmed and pmLA and low<pmL and close>pmL
+if pdHSweep
+    pdHA:=false
+if pdLSweep
+    pdLA:=false
+if pwHSweep
+    pwHA:=false
+if pwLSweep
+    pwLA:=false
+if pmHSweep
+    pmHA:=false
+if pmLSweep
+    pmLA:=false
+
+// Line/text object lifecycle.
+var line[] levelLines=array.new_line()
+var label[] levelLabels=array.new_label()
+f_clear_level_objects() =>
+    if array.size(levelLines)>0
+        for n=array.size(levelLines)-1 to 0
+            line.delete(array.get(levelLines,n))
+        array.clear(levelLines)
+    if array.size(levelLabels)>0
+        for n=array.size(levelLabels)-1 to 0
+            label.delete(array.get(levelLabels,n))
+        array.clear(levelLabels)
+
+// Rebuild the visible active set at each bar. The object count is bounded by
+// six levels and their six labels, keeping the renderer deterministic.
+if barstate.isfirst or newDay or newWeek or newMonth
+    f_clear_level_objects()
+    if showLiquidity
+        if pdHA and usePD
+            array.push(levelLines,line.new(bar_index,pdH,bar_index,pdH,extend=extend.none))
+            if showLevelText
+                array.push(levelLabels,label.new(bar_index,pdH,"PDH",style=label.style_none))
+        if pdLA and usePD
+            array.push(levelLines,line.new(bar_index,pdL,bar_index,pdL,extend=extend.none))
+            if showLevelText
+                array.push(levelLabels,label.new(bar_index,pdL,"PDL",style=label.style_none))
+        if pwHA and usePW
+            array.push(levelLines,line.new(bar_index,pwH,bar_index,pwH,extend=extend.none))
+            if showLevelText
+                array.push(levelLabels,label.new(bar_index,pwH,"PWH",style=label.style_none))
+        if pwLA and usePW
+            array.push(levelLines,line.new(bar_index,pwL,bar_index,pwL,extend=extend.none))
+            if showLevelText
+                array.push(levelLabels,label.new(bar_index,pwL,"PWL",style=label.style_none))
+        if pmHA and usePM
+            array.push(levelLines,line.new(bar_index,pmH,bar_index,pmH,extend=extend.none))
+            if showLevelText
+                array.push(levelLabels,label.new(bar_index,pmH,"PMH",style=label.style_none))
+        if pmLA and usePM
+            array.push(levelLines,line.new(bar_index,pmL,bar_index,pmL,extend=extend.none))
+            if showLevelText
+                array.push(levelLabels,label.new(bar_index,pmL,"PML",style=label.style_none))
+
+if array.size(levelLines)>0
+    for n=0 to array.size(levelLines)-1
+        line.set_x2(array.get(levelLines,n),bar_index)
+
+// Remove swept level's corresponding visual object. Because objects are
+// indexed by creation order, rebuild at the next period boundary if needed.
+if pdHSweep or pdLSweep or pwHSweep or pwLSweep or pmHSweep or pmLSweep
+    f_clear_level_objects()
+
+// Plain text events: no shape/box renderer.
+if showStructure and iBullBreak
+    label.new(bar_index,low,iBullText,style=label.style_none)
+if showStructure and iBearBreak
+    label.new(bar_index,high,iBearText,style=label.style_none)
+if showStructure and xBullBreak
+    label.new(bar_index,low,xBullText,style=label.style_none)
+if showStructure and xBearBreak
+    label.new(bar_index,high,xBearText,style=label.style_none)
+if showSweeps and pdHSweep
+    label.new(bar_index,high,"PDH sweep",style=label.style_none)
+if showSweeps and pdLSweep
+    label.new(bar_index,low,"PDL sweep",style=label.style_none)
+if showSweeps and pwHSweep
+    label.new(bar_index,high,"PWH sweep",style=label.style_none)
+if showSweeps and pwLSweep
+    label.new(bar_index,low,"PWL sweep",style=label.style_none)
+if showSweeps and pmHSweep
+    label.new(bar_index,high,"PMH sweep",style=label.style_none)
+if showSweeps and pmLSweep
+    label.new(bar_index,low,"PML sweep",style=label.style_none)
+
+// Diagnostics only when explicitly requested.
+var table diag=table.new(position.top_right,2,7)
+if barstate.islast
+    if diagnostic
+        table.cell(diag,0,0,"ARTHA P01.5")
+        table.cell(diag,1,0,"ENGINE")
+        table.cell(diag,0,1,"Internal bias")
+        table.cell(diag,1,1,iBias)
+        table.cell(diag,0,2,"External bias")
+        table.cell(diag,1,2,xBias)
+        table.cell(diag,0,3,"PD")
+        table.cell(diag,1,3,(pdHA?"ACTIVE":"CONSUMED")+" / "+(pdLA?"ACTIVE":"CONSUMED"))
+        table.cell(diag,0,4,"PW")
+        table.cell(diag,1,4,(pwHA?"ACTIVE":"CONSUMED")+" / "+(pwLA?"ACTIVE":"CONSUMED"))
+        table.cell(diag,0,5,"PM")
+        table.cell(diag,1,5,(pmHA?"ACTIVE":"CONSUMED")+" / "+(pmLA?"ACTIVE":"CONSUMED"))
+        table.cell(diag,0,6,"HTF data")
+        table.cell(diag,1,6,"PREVIOUS ONLY")
+    else
+        table.clear(diag,0,0,1,6)
+
+alertcondition(pdHSweep or pwHSweep or pmHSweep,"ARTHA Bearish Liquidity Sweep","Confirmed buy-side liquidity sweep")
+alertcondition(pdLSweep or pwLSweep or pmLSweep,"ARTHA Bullish Liquidity Sweep","Confirmed sell-side liquidity sweep")
