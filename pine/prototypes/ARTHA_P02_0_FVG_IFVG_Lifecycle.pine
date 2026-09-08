@@ -98,7 +98,7 @@ if array.size(tops)>0
         if bar_index>bornBar and state==0
             float height=math.max(top-bot,syminfo.mintick)
             float penetration=dir==1?top-low:high-bot
-            float fillPct=math.clamp(penetration/height*100.0,0.0,100.0)
+            float fillPct=math.max(0.0,math.min(100.0,penetration/height*100.0))
             bool mitigated=fillPct>=mitigationPct
             bool fullyFilled=fillPct>=100.0
             bool polarityClose=dir==1?close<bot:close>top
