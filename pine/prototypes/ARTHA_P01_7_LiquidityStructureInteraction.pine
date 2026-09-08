@@ -1,0 +1,299 @@
+//@version=6
+indicator("ARTHA P01.7 — Liquidity + Structure Interaction", overlay=true, max_lines_count=500, max_labels_count=500)
+
+// P01.7 connects confirmed structure with liquidity events.
+// Liquidity sweeps do not imply reversal. A sweep becomes directional only
+// after reclaim + displacement + protected-structure confirmation.
+
+string GS="01 Structure"
+int iLen=input.int(2,"Internal pivot strength",minval=1,group=GS)
+int xLen=input.int(5,"External pivot strength",minval=2,group=GS)
+float mssATR=input.float(0.75,"MSS body / ATR",minval=0,step=0.05,group=GS)
+bool requireClose=input.bool(true,"Require close through structure",group=GS)
+
+string GL="02 Liquidity"
+bool usePD=input.bool(true,"Previous Day",group=GL)
+bool usePW=input.bool(true,"Previous Week",group=GL)
+bool usePM=input.bool(true,"Previous Month",group=GL)
+bool useSwingLiq=input.bool(true,"Swing liquidity",group=GL)
+
+string GD="03 Display"
+bool showStructure=input.bool(true,"Structure text",group=GD)
+bool showLiquidity=input.bool(true,"Liquidity text",group=GD)
+bool showSwings=input.bool(false,"Swing labels",group=GD)
+bool diagnostic=input.bool(false,"Diagnostic panel",group=GD)
+
+atr=ta.atr(14)
+body=math.abs(close-open)
+disp=atr>0?body/atr:0.0
+
+//================ PIVOTS / SWINGS ================
+iPH=ta.pivothigh(high,iLen,iLen)
+iPL=ta.pivotlow(low,iLen,iLen)
+xPH=ta.pivothigh(high,xLen,xLen)
+xPL=ta.pivotlow(low,xLen,xLen)
+
+var float iHigh=na
+var float iLow=na
+var int iHighBar=na
+var int iLowBar=na
+var float xHigh=na
+var float xLow=na
+var int xHighBar=na
+var int xLowBar=na
+if not na(iPH)
+    iHigh:=iPH
+    iHighBar:=bar_index-iLen
+if not na(iPL)
+    iLow:=iPL
+    iLowBar:=bar_index-iLen
+if not na(xPH)
+    xHigh:=xPH
+    xHighBar:=bar_index-xLen
+if not na(xPL)
+    xLow:=xPL
+    xLowBar:=bar_index-xLen
+
+// Persistent break targets. They are not replaced by a newer pivot until the
+// current target has been consumed, preventing moving break references.
+var float iTargetHigh=na
+var int iTargetHighBar=na
+var bool iHighWaiting=false
+var float iTargetLow=na
+var int iTargetLowBar=na
+var bool iLowWaiting=false
+var float xTargetHigh=na
+var int xTargetHighBar=na
+var bool xHighWaiting=false
+var float xTargetLow=na
+var int xTargetLowBar=na
+var bool xLowWaiting=false
+
+if not na(iPH) and not iHighWaiting
+    iTargetHigh:=iPH
+    iTargetHighBar:=bar_index-iLen
+    iHighWaiting:=true
+if not na(iPL) and not iLowWaiting
+    iTargetLow:=iPL
+    iTargetLowBar:=bar_index-iLen
+    iLowWaiting:=true
+if not na(xPH) and not xHighWaiting
+    xTargetHigh:=xPH
+    xTargetHighBar:=bar_index-xLen
+    xHighWaiting:=true
+if not na(xPL) and not xLowWaiting
+    xTargetLow:=xPL
+    xTargetLowBar:=bar_index-xLen
+    xLowWaiting:=true
+
+var int iTrend=0
+var int xTrend=0
+var float iProtectedLow=na
+var float iProtectedHigh=na
+var float xProtectedLow=na
+var float xProtectedHigh=na
+
+oldITrend=iTrend
+oldXTrend=xTrend
+
+iBullBreak=barstate.isconfirmed and iHighWaiting and not na(iTargetHigh) and (requireClose?close>iTargetHigh:high>iTargetHigh)
+iBearBreak=barstate.isconfirmed and iLowWaiting and not na(iTargetLow) and (requireClose?close<iTargetLow:low<iTargetLow)
+xBullBreak=barstate.isconfirmed and xHighWaiting and not na(xTargetHigh) and (requireClose?close>xTargetHigh:high>xTargetHigh)
+xBearBreak=barstate.isconfirmed and xLowWaiting and not na(xTargetLow) and (requireClose?close<xTargetLow:low<xTargetLow)
+
+iBullMSS=iBullBreak and oldITrend<0 and disp>=mssATR
+iBearMSS=iBearBreak and oldITrend>0 and disp>=mssATR
+xBullMSS=xBullBreak and oldXTrend<0 and disp>=mssATR
+xBearMSS=xBearBreak and oldXTrend>0 and disp>=mssATR
+
+iBullCH=iBullBreak and oldITrend<0 and not iBullMSS
+iBearCH=iBearBreak and oldITrend>0 and not iBearMSS
+xBullCH=xBullBreak and oldXTrend<0 and not xBullMSS
+xBearCH=xBearBreak and oldXTrend>0 and not xBearMSS
+
+iBullBOS=iBullBreak and not iBullCH and not iBullMSS
+iBearBOS=iBearBreak and not iBearCH and not iBearMSS
+xBullBOS=xBullBreak and not xBullCH and not xBullMSS
+xBearBOS=xBearBreak and not xBearCH and not xBearMSS
+
+if iBullBreak
+    iHighWaiting:=false
+    iProtectedLow:=iLow
+    iTrend:=1
+if iBearBreak
+    iLowWaiting:=false
+    iProtectedHigh:=iHigh
+    iTrend:=-1
+if xBullBreak
+    xHighWaiting:=false
+    xProtectedLow:=xLow
+    xTrend:=1
+if xBearBreak
+    xLowWaiting:=false
+    xProtectedHigh:=xHigh
+    xTrend:=-1
+
+//================ PREVIOUS D/W/M LIQUIDITY ================
+pdH=request.security(syminfo.tickerid,"D",high[1],lookahead=barmerge.lookahead_on)
+pdL=request.security(syminfo.tickerid,"D",low[1],lookahead=barmerge.lookahead_on)
+pwH=request.security(syminfo.tickerid,"W",high[1],lookahead=barmerge.lookahead_on)
+pwL=request.security(syminfo.tickerid,"W",low[1],lookahead=barmerge.lookahead_on)
+pmH=request.security(syminfo.tickerid,"M",high[1],lookahead=barmerge.lookahead_on)
+pmL=request.security(syminfo.tickerid,"M",low[1],lookahead=barmerge.lookahead_on)
+newD=ta.change(time("D"))!=0
+newW=ta.change(time("W"))!=0
+newM=ta.change(time("M"))!=0
+
+var bool pdHA=false
+var bool pdLA=false
+var bool pwHA=false
+var bool pwLA=false
+var bool pmHA=false
+var bool pmLA=false
+if barstate.isfirst or newD
+    pdHA:=usePD and not na(pdH)
+    pdLA:=usePD and not na(pdL)
+if barstate.isfirst or newW
+    pwHA:=usePW and not na(pwH)
+    pwLA:=usePW and not na(pwL)
+if barstate.isfirst or newM
+    pmHA:=usePM and not na(pmH)
+    pmLA:=usePM and not na(pmL)
+
+// A sweep is an excursion beyond the level followed by a close back inside.
+// A simple break/close beyond the level is NOT classified as a sweep.
+pdHSweep=barstate.isconfirmed and pdHA and high>pdH and close<pdH
+pdLSweep=barstate.isconfirmed and pdLA and low<pdL and close>pdL
+pwHSweep=barstate.isconfirmed and pwHA and high>pwH and close<pwH
+pwLSweep=barstate.isconfirmed and pwLA and low<pwL and close>pwL
+pmHSweep=barstate.isconfirmed and pmHA and high>pmH and close<pmH
+pmLSweep=barstate.isconfirmed and pmLA and low<pmL and close>pmL
+if pdHSweep
+    pdHA:=false
+if pdLSweep
+    pdLA:=false
+if pwHSweep
+    pwHA:=false
+if pwLSweep
+    pwLA:=false
+if pmHSweep
+    pmHA:=false
+if pmLSweep
+    pmLA:=false
+
+//================ LIQUIDITY -> STRUCTURE SETUP STATE ================
+// States intentionally do not issue entries. They describe what the engine
+// believes happened, preserving the distinction between sweep and reversal.
+var string setup="NONE"
+var string setupSide="NONE"
+var string setupSource="NONE"
+var int setupBar=na
+
+bullSweep=pdLSweep or pwLSweep or pmLSweep
+bearSweep=pdHSweep or pwHSweep or pmHSweep
+if bullSweep
+    setup:="SWEEP_ONLY"
+    setupSide:="LONG_CANDIDATE"
+    setupSource:=pdLSweep?"PDL":pwLSweep?"PWL":"PML"
+    setupBar:=bar_index
+if bearSweep
+    setup:="SWEEP_ONLY"
+    setupSide:="SHORT_CANDIDATE"
+    setupSource:=pdHSweep?"PDH":pwHSweep?"PWH":"PMH"
+    setupBar:=bar_index
+
+// Reversal confirmation requires a same-direction structure shift after the
+// sweep. MSS is strongest; CHoCH is valid but weaker. A BOS after a sweep is
+// continuation, not automatically a reversal signal.
+bullShift=iBullMSS or xBullMSS or iBullCH or xBullCH
+bearShift=iBearMSS or xBearMSS or iBearCH or xBearCH
+if setupSide=="LONG_CANDIDATE" and bullShift and bar_index>=setupBar
+    setup:=iBullMSS or xBullMSS?"CONFIRMED_MSS":"CONFIRMED_CHOCH"
+if setupSide=="SHORT_CANDIDATE" and bearShift and bar_index>=setupBar
+    setup:=iBearMSS or xBearMSS?"CONFIRMED_MSS":"CONFIRMED_CHOCH"
+
+// A contradictory structural continuation cancels the directional candidate.
+if setupSide=="LONG_CANDIDATE" and (iBearBOS or xBearBOS)
+    setup:="INVALIDATED"
+if setupSide=="SHORT_CANDIDATE" and (iBullBOS or xBullBOS)
+    setup:="INVALIDATED"
+
+//================ VISUALS ================
+if showSwings and not na(iPH)
+    label.new(bar_index-iLen,iPH,"iH",style=label.style_none)
+if showSwings and not na(iPL)
+    label.new(bar_index-iLen,iPL,"iL",style=label.style_none)
+
+if showStructure and iBullMSS
+    label.new(bar_index,low,"iMSS ↑",style=label.style_none)
+else if showStructure and iBullCH
+    label.new(bar_index,low,"iCHoCH ↑",style=label.style_none)
+else if showStructure and iBullBOS
+    label.new(bar_index,low,"iBOS ↑",style=label.style_none)
+if showStructure and iBearMSS
+    label.new(bar_index,high,"iMSS ↓",style=label.style_none)
+else if showStructure and iBearCH
+    label.new(bar_index,high,"iCHoCH ↓",style=label.style_none)
+else if showStructure and iBearBOS
+    label.new(bar_index,high,"iBOS ↓",style=label.style_none)
+if showStructure and xBullMSS
+    label.new(bar_index,low,"xMSS ↑",style=label.style_none)
+else if showStructure and xBullCH
+    label.new(bar_index,low,"xCHoCH ↑",style=label.style_none)
+else if showStructure and xBullBOS
+    label.new(bar_index,low,"xBOS ↑",style=label.style_none)
+if showStructure and xBearMSS
+    label.new(bar_index,high,"xMSS ↓",style=label.style_none)
+else if showStructure and xBearCH
+    label.new(bar_index,high,"xCHoCH ↓",style=label.style_none)
+else if showStructure and xBearBOS
+    label.new(bar_index,high,"xBOS ↓",style=label.style_none)
+
+if showLiquidity and pdHSweep
+    label.new(bar_index,high,"PDH sweep",style=label.style_none)
+if showLiquidity and pdLSweep
+    label.new(bar_index,low,"PDL sweep",style=label.style_none)
+if showLiquidity and pwHSweep
+    label.new(bar_index,high,"PWH sweep",style=label.style_none)
+if showLiquidity and pwLSweep
+    label.new(bar_index,low,"PWL sweep",style=label.style_none)
+if showLiquidity and pmHSweep
+    label.new(bar_index,high,"PMH sweep",style=label.style_none)
+if showLiquidity and pmLSweep
+    label.new(bar_index,low,"PML sweep",style=label.style_none)
+
+//================ DIAGNOSTICS ================
+var table t=table.new(position.top_right,2,12)
+if barstate.islast
+    table.clear(t,0,0,1,11)
+    if diagnostic
+        table.cell(t,0,0,"P01.7")
+        table.cell(t,1,0,"LIQUIDITY / STRUCTURE")
+        table.cell(t,0,1,"Internal trend")
+        table.cell(t,1,1,iTrend==1?"BULL":iTrend==-1?"BEAR":"NEUTRAL")
+        table.cell(t,0,2,"External trend")
+        table.cell(t,1,2,xTrend==1?"BULL":xTrend==-1?"BEAR":"NEUTRAL")
+        table.cell(t,0,3,"PD H/L")
+        table.cell(t,1,3,(pdHA?"A":"X")+" / "+(pdLA?"A":"X"))
+        table.cell(t,0,4,"PW H/L")
+        table.cell(t,1,4,(pwHA?"A":"X")+" / "+(pwLA?"A":"X"))
+        table.cell(t,0,5,"PM H/L")
+        table.cell(t,1,5,(pmHA?"A":"X")+" / "+(pmLA?"A":"X"))
+        table.cell(t,0,6,"Last setup")
+        table.cell(t,1,6,setup)
+        table.cell(t,0,7,"Setup side")
+        table.cell(t,1,7,setupSide)
+        table.cell(t,0,8,"Setup source")
+        table.cell(t,1,8,setupSource)
+        table.cell(t,0,9,"Protected i")
+        table.cell(t,1,9,str.tostring(iProtectedHigh)+" / "+str.tostring(iProtectedLow))
+        table.cell(t,0,10,"Protected x")
+        table.cell(t,1,10,str.tostring(xProtectedHigh)+" / "+str.tostring(xProtectedLow))
+        table.cell(t,0,11,"Displacement")
+        table.cell(t,1,11,str.tostring(disp,"#.##"))
+
+alertcondition(bullSweep,"ARTHA Bullish Liquidity Sweep","Confirmed sell-side liquidity sweep")
+alertcondition(bearSweep,"ARTHA Bearish Liquidity Sweep","Confirmed buy-side liquidity sweep")
+alertcondition(iBullMSS or xBullMSS,"ARTHA Bullish MSS","Confirmed bullish MSS")
+alertcondition(iBearMSS or xBearMSS,"ARTHA Bearish MSS","Confirmed bearish MSS")
+alertcondition(setup=="CONFIRMED_MSS","ARTHA Confirmed MSS Setup","Liquidity sweep followed by confirmed MSS")
