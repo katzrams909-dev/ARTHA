@@ -33,14 +33,16 @@ asiaIn=f_inSession(asia)
 londonIn=f_inSession(london)
 nyIn=f_inSession(newYork)
 
+// Explicit element types are required here. array.from(na, na, na) can infer
+// na as an integer array in Pine, which then rejects float assignments to hi/lo.
 // Session state arrays are indexed 0=Asia, 1=London, 2=New York.
 var bool[] active=array.from(false,false,false)
-var float[] hi=array.from(na,na,na)
-var float[] lo=array.from(na,na,na)
-var int[] startBar=array.from(na,na,na)
-var int[] lastBar=array.from(na,na,na)
-var int[] highBar=array.from(na,na,na)
-var int[] lowBar=array.from(na,na,na)
+var float[] hi=array.new_float(3,na)
+var float[] lo=array.new_float(3,na)
+var int[] startBar=array.new_int(3,na)
+var int[] lastBar=array.new_int(3,na)
+var int[] highBar=array.new_int(3,na)
+var int[] lowBar=array.new_int(3,na)
 var line[] hiLines=array.new_line()
 var line[] loLines=array.new_line()
 var label[] sessionLabels=array.new_label()
@@ -53,7 +55,7 @@ f_addCompleted(_region,_hi,_lo,_hiBar,_loBar,_endBar,_startBar) =>
     if trackCompleted
         line hLine=line.new(_hiBar,_hi,_endBar,_hi,xloc=xloc.bar_index)
         line lLine=line.new(_loBar,_lo,_endBar,_lo,xloc=xloc.bar_index)
-        label lab=showLabels?label.new(_startBar,_hi,_region==0?"ASIA":"",style=label.style_none):na
+        label lab=showLabels?label.new(_startBar,_hi,_region==0?"ASIA":_region==1?"LONDON":"NEW YORK",style=label.style_none):na
         array.push(hiLines,hLine)
         array.push(loLines,lLine)
         array.push(sessionLabels,lab)
@@ -65,7 +67,7 @@ prevAsia=array.get(active,0)
 prevLondon=array.get(active,1)
 prevNY=array.get(active,2)
 
-f_process(_idx,_in,_name) =>
+f_process(_idx,_in) =>
     bool was=array.get(active,_idx)
     if _in
         if not was
@@ -103,9 +105,9 @@ f_process(_idx,_in,_name) =>
         array.set(highBar,_idx,na)
         array.set(lowBar,_idx,na)
 
-f_process(0,asiaIn,"Asia")
-f_process(1,londonIn,"London")
-f_process(2,nyIn,"New York")
+f_process(0,asiaIn)
+f_process(1,londonIn)
+f_process(2,nyIn)
 
 // The completion visual is bounded globally. This prevents three independent
 // session queues from silently exceeding Pine drawing limits.
