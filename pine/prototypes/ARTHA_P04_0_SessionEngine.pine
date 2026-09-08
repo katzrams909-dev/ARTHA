@@ -1,5 +1,5 @@
 //@version=6
-indicator("ARTHA P04.0 — Session Engine", overlay=true, max_lines_count=300, max_labels_count=200)
+indicator("ARTHA P04.0 — Session Engine", overlay=true, max_lines_count=300, max_labels_count=500)
 
 // P04.0 standalone validation prototype.
 // Tracks Asia, London and New York independently. Session state is calculated
@@ -24,6 +24,8 @@ bool showLondon=input.bool(true,"Show London",group=GV)
 bool showNewYork=input.bool(true,"Show New York",group=GV)
 bool showLabels=input.bool(true,"Show session labels",group=GV)
 bool showLevels=input.bool(true,"Show session high/low",group=GV)
+bool showHLLabels=input.bool(true,"Show H/L labels",group=GV)
+bool showCurrent=input.bool(true,"Show current session",group=GV)
 bool diagnostic=input.bool(false,"Diagnostic panel",group=GV)
 
 f_inSession(_session) =>
@@ -43,22 +45,44 @@ var int[] startBar=array.new_int(3,na)
 var int[] lastBar=array.new_int(3,na)
 var int[] highBar=array.new_int(3,na)
 var int[] lowBar=array.new_int(3,na)
+
 var line[] hiLines=array.new_line()
 var line[] loLines=array.new_line()
 var label[] sessionLabels=array.new_label()
+var label[] highLabels=array.new_label()
+var label[] lowLabels=array.new_label()
 var int[] lineRegions=array.new_int()
 var int[] lineSessionEnds=array.new_int()
 
-// A separate bounded visual record is used for completed sessions. The engine
-// state itself is not removed when display is hidden.
+var label[] currentSessionLabels=array.new_label(3)
+var label[] currentHighLabels=array.new_label(3)
+var label[] currentLowLabels=array.new_label(3)
+
+f_name(_region) =>
+    _region==0?"ASIA":_region==1?"LONDON":"NEW YORK"
+
+f_sessionVisible(_region) =>
+    _region==0?showAsia:_region==1?showLondon:showNewYork
+
+f_sessionText(_region) =>
+    f_name(_region)
+
+// Completed sessions receive explicit H/L labels at the actual extreme bars,
+// plus a session label at the session start. This makes old sessions visually
+// identifiable without relying on color alone.
 f_addCompleted(_region,_hi,_lo,_hiBar,_loBar,_endBar,_startBar) =>
     if trackCompleted
         line hLine=line.new(_hiBar,_hi,_endBar,_hi,xloc=xloc.bar_index)
         line lLine=line.new(_loBar,_lo,_endBar,_lo,xloc=xloc.bar_index)
-        label lab=showLabels?label.new(_startBar,_hi,_region==0?"ASIA":_region==1?"LONDON":"NEW YORK",style=label.style_none):na
+        string name=f_name(_region)
+        label sLab=label.new(_startBar,_hi,name,style=label.style_label_down,size=size.tiny)
+        label hLab=label.new(_hiBar,_hi,name+" H",style=label.style_label_down,size=size.tiny)
+        label lLab=label.new(_loBar,_lo,name+" L",style=label.style_label_up,size=size.tiny)
         array.push(hiLines,hLine)
         array.push(loLines,lLine)
-        array.push(sessionLabels,lab)
+        array.push(sessionLabels,sLab)
+        array.push(highLabels,hLab)
+        array.push(lowLabels,lLab)
         array.push(lineRegions,_region)
         array.push(lineSessionEnds,_endBar)
 
@@ -69,6 +93,8 @@ prevNY=array.get(active,2)
 
 f_process(_idx,_in) =>
     bool was=array.get(active,_idx)
+    bool visible=f_sessionVisible(_idx)
+    string name=f_name(_idx)
     if _in
         if not was
             array.set(active,_idx,true)
@@ -78,6 +104,21 @@ f_process(_idx,_in) =>
             array.set(lastBar,_idx,bar_index)
             array.set(highBar,_idx,bar_index)
             array.set(lowBar,_idx,bar_index)
+            label oldSession=array.get(currentSessionLabels,_idx)
+            if not na(oldSession)
+                label.delete(oldSession)
+            label oldHigh=array.get(currentHighLabels,_idx)
+            if not na(oldHigh)
+                label.delete(oldHigh)
+            label oldLow=array.get(currentLowLabels,_idx)
+            if not na(oldLow)
+                label.delete(oldLow)
+            label newSession=label.new(bar_index,high,name,style=label.style_label_down,size=size.small)
+            label newHigh=label.new(bar_index,high,name+" H",style=label.style_label_down,size=size.tiny)
+            label newLow=label.new(bar_index,low,name+" L",style=label.style_label_up,size=size.tiny)
+            array.set(currentSessionLabels,_idx,newSession)
+            array.set(currentHighLabels,_idx,newHigh)
+            array.set(currentLowLabels,_idx,newLow)
         else
             float oldHi=array.get(hi,_idx)
             float oldLo=array.get(lo,_idx)
@@ -88,6 +129,23 @@ f_process(_idx,_in) =>
                 array.set(lo,_idx,low)
                 array.set(lowBar,_idx,bar_index)
             array.set(lastBar,_idx,bar_index)
+
+        // Current-session labels follow the live H/L while the session is active.
+        label sLab=array.get(currentSessionLabels,_idx)
+        label hLab=array.get(currentHighLabels,_idx)
+        label lLab=array.get(currentLowLabels,_idx)
+        if not na(sLab)
+            label.set_x(sLab,array.get(startBar,_idx))
+            label.set_y(sLab,array.get(hi,_idx))
+            label.set_text(sLab,showCurrent and showLabels and visible?name:"")
+        if not na(hLab)
+            label.set_x(hLab,array.get(highBar,_idx))
+            label.set_y(hLab,array.get(hi,_idx))
+            label.set_text(hLab,showCurrent and showHLLabels and visible?name+" H":"")
+        if not na(lLab)
+            label.set_x(lLab,array.get(lowBar,_idx))
+            label.set_y(lLab,array.get(lo,_idx))
+            label.set_text(lLab,showCurrent and showHLLabels and visible?name+" L":"")
     else if was and barstate.isconfirmed
         float endHi=array.get(hi,_idx)
         float endLo=array.get(lo,_idx)
@@ -95,7 +153,6 @@ f_process(_idx,_in) =>
         int endLoBar=array.get(lowBar,_idx)
         int endBar=array.get(lastBar,_idx)
         int beginBar=array.get(startBar,_idx)
-        // Completed levels are emitted only from confirmed session-close data.
         f_addCompleted(_idx,endHi,endLo,endHiBar,endLoBar,endBar,beginBar)
         array.set(active,_idx,false)
         array.set(hi,_idx,na)
@@ -104,6 +161,18 @@ f_process(_idx,_in) =>
         array.set(lastBar,_idx,na)
         array.set(highBar,_idx,na)
         array.set(lowBar,_idx,na)
+        label sessionToDelete=array.get(currentSessionLabels,_idx)
+        if not na(sessionToDelete)
+            label.delete(sessionToDelete)
+        label highToDelete=array.get(currentHighLabels,_idx)
+        if not na(highToDelete)
+            label.delete(highToDelete)
+        label lowToDelete=array.get(currentLowLabels,_idx)
+        if not na(lowToDelete)
+            label.delete(lowToDelete)
+        array.set(currentSessionLabels,_idx,na)
+        array.set(currentHighLabels,_idx,na)
+        array.set(currentLowLabels,_idx,na)
 
 f_process(0,asiaIn)
 f_process(1,londonIn)
@@ -114,9 +183,15 @@ f_process(2,nyIn)
 while array.size(hiLines)>maxCompleted*3
     line.delete(array.shift(hiLines))
     line.delete(array.shift(loLines))
-    label old=array.shift(sessionLabels)
-    if not na(old)
-        label.delete(old)
+    label oldSession=array.shift(sessionLabels)
+    label oldHigh=array.shift(highLabels)
+    label oldLow=array.shift(lowLabels)
+    if not na(oldSession)
+        label.delete(oldSession)
+    if not na(oldHigh)
+        label.delete(oldHigh)
+    if not na(oldLow)
+        label.delete(oldLow)
     array.shift(lineRegions)
     array.shift(lineSessionEnds)
 
@@ -124,15 +199,21 @@ while array.size(hiLines)>maxCompleted*3
 if array.size(hiLines)>0
     for i=0 to array.size(hiLines)-1
         int region=array.get(lineRegions,i)
-        bool visible=showLevels and ((region==0 and showAsia) or (region==1 and showLondon) or (region==2 and showNewYork))
+        bool visible=showLevels and f_sessionVisible(region)
         line hLine=array.get(hiLines,i)
         line lLine=array.get(loLines,i)
         line.set_color(hLine,visible?color.gray:color.new(color.white,100))
         line.set_color(lLine,visible?color.gray:color.new(color.white,100))
-        label lab=array.get(sessionLabels,i)
-        if not na(lab)
-            bool labelVisible=showLabels and ((region==0 and showAsia) or (region==1 and showLondon) or (region==2 and showNewYork))
-            label.set_text(lab,labelVisible?(region==0?"ASIA":region==1?"LONDON":"NEW YORK"):"")
+        label sLab=array.get(sessionLabels,i)
+        label hLab=array.get(highLabels,i)
+        label lLab=array.get(lowLabels,i)
+        bool labelVisible=f_sessionVisible(region)
+        if not na(sLab)
+            label.set_text(sLab,showLabels and labelVisible?f_name(region):"")
+        if not na(hLab)
+            label.set_text(hLab,showHLLabels and labelVisible?f_name(region)+" H":"")
+        if not na(lLab)
+            label.set_text(lLab,showHLLabels and labelVisible?f_name(region)+" L":"")
 
 // Current-session diagnostics are calculated independently of rendering.
 int asiaStatus=asiaIn?1:0
