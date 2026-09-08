@@ -51,10 +51,6 @@ bullBreak=barstate.isconfirmed and waitingHigh and (requireClose?close>targetHig
 bearBreak=barstate.isconfirmed and waitingLow and (requireClose?close<targetLow:low<targetLow) and disp>=dispATR
 
 //================ ORDER-BLOCK CANDIDATES ================
-// The candidate is selected only from already-closed candles. For a bullish
-// break, choose the most recent bearish candle before the break. For a bearish
-// break, choose the most recent bullish candle. This deliberately avoids using
-// the current displacement candle as its own OB.
 f_findBullCandidate() =>
     int found=-1
     for n=1 to searchBack
@@ -74,11 +70,9 @@ f_findBearCandidate() =>
 int bullCand=bullBreak?f_findBullCandidate():-1
 int bearCand=bearBreak?f_findBearCandidate():-1
 
-//================ LIFECYCLE ARRAYS ================
 // States: 0 ACTIVE OB, 1 MITIGATED OB, 2 BREAKER, 3 INVALIDATED.
-// Direction: 1 bullish OB / -1 bearish OB. A breaker renders in the opposite
-// direction, but retains its source direction so lifecycle boundaries remain
-// unambiguous.
+// Direction is source OB polarity: 1 bullish / -1 bearish. Breaker polarity
+// is therefore the opposite of the source direction.
 var float[] tops=array.new_float()
 var float[] bots=array.new_float()
 var int[] dirs=array.new_int()
@@ -111,9 +105,8 @@ f_add(_top,_bot,_dir,_born) =>
     label l=label.new(_born,_top,_dir==1?"OB ↑":"OB ↓",style=label.style_none)
     array.push(labels,l)
 
-// Only create an OB when the candidate exists and the structural break is
-// confirmed. The break consumes its structure target, preserving persistent
-// target behavior used by P01.6/P01.7.
+// The structure target is consumed by the confirmed break. This preserves the
+// persistent-target behavior established by P01.6/P01.7.
 if bullBreak
     waitingHigh:=false
     if bullCand>0
@@ -145,15 +138,12 @@ if array.size(tops)>0
         int dir=array.get(dirs,i)
         int state=array.get(states,i)
         int bornBar=array.get(born,i)
-        bool wasMitigated=array.get(mitigatedFlags,i)
         box b=array.get(boxes,i)
         label l=array.get(labels,i)
 
         if state!=3
             box.set_right(b,bar_index)
 
-        // Lifecycle starts on the bar after the candidate candle. All state
-        // changes are confirmed-bar only, preventing intrabar repaint.
         if barstate.isconfirmed and bar_index>bornBar and state<=1
             float height=math.max(top-bot,syminfo.mintick)
             float penetration=dir==1?top-low:high-bot
@@ -176,9 +166,7 @@ if array.size(tops)>0
                     bullBreakerEvent:=true
 
         else if barstate.isconfirmed and bar_index>bornBar and state==2
-            // Breaker invalidation uses the source OB's original near boundary:
-            // bullish-origin breaker fails on a confirmed close back above top;
-            // bearish-origin breaker fails on a confirmed close back below bot.
+            // Breaker invalidation uses the source OB's original near boundary.
             bool breakerInvalid=dir==1?close>top:close<bot
             if breakerInvalid
                 array.set(states,i,3)
@@ -188,7 +176,6 @@ if array.size(tops)>0
                     invalidBullEvent:=true
 
         state:=array.get(states,i)
-        wasMitigated:=array.get(mitigatedFlags,i)
         if state==0
             label.set_text(l,showText?(dir==1?"OB ↑":"OB ↓"):"")
         else if state==1
@@ -207,11 +194,10 @@ if array.size(tops)>0
         else
             invalidCount+=1
 
-// Creation events are emitted from the confirmed structural break, not from
-// visual state. This keeps renderer settings independent of engine state.
 bullOBEvent:=bullBreak and bullCand>0
 bearOBEvent:=bearBreak and bearCand>0
 
+// Rendering is derived from state. Visibility cannot disable lifecycle logic.
 if array.size(boxes)>0
     for i=0 to array.size(boxes)-1
         int dir=array.get(dirs,i)
