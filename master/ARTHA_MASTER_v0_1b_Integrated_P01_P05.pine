@@ -1,0 +1,1172 @@
+//@version=6
+indicator("ARTHA MASTER v0.1 — Integrated P01–P05", shorttitle="ARTHA M0.1", overlay=true, max_lines_count=500, max_boxes_count=300, max_labels_count=500)
+
+//=============================================================================
+// ARTHA MASTER v0.1
+// Integrated foundation from validated P01–P05 prototypes.
+//
+// OWNERSHIP
+//  Time / sessions        -> shared service + P04
+//  ATR / displacement     -> shared service
+//  Pivots / structure     -> P01.6/P01.7 contract
+//  Liquidity              -> P01 core + P01.7 + completed session H/L
+//  FVG / IFVG             -> P02 lifecycle
+//  OB / Breaker           -> P03 lifecycle, consuming shared structure
+//  Premium / Discount     -> P05.1 dealing-range logic, consuming shared structure
+//
+// IMPORTANT
+//  - Calculations run regardless of visibility.
+//  - Confirmed-bar state transitions only where required.
+//  - No signal/entry/SL/TP engine yet. This is the integrated market/context core.
+//=============================================================================
+
+//=============================================================================
+// 01. GLOBAL DISPLAY
+//=============================================================================
+string G_DISPLAY = "01 Global Display"
+string displayMode = input.string("Analysis", "Display mode", options=["Execution","Analysis","Full"], group=G_DISPLAY)
+bool diagnostic = input.bool(false, "Diagnostic panel", group=G_DISPLAY)
+string structureLabelMode = input.string("Compact", "Structure labels", options=["Compact","Full","Lines only","Off"], group=G_DISPLAY)
+
+bool modeExecution = displayMode == "Execution"
+bool modeAnalysis = displayMode == "Analysis"
+bool modeFull = displayMode == "Full"
+
+//=============================================================================
+// 02. SHARED STRUCTURE / DISPLACEMENT
+//=============================================================================
+string G_STRUCT = "02 Structure"
+int iLen = input.int(2, "Internal pivot strength", minval=1, group=G_STRUCT)
+int xLen = input.int(5, "External pivot strength", minval=2, group=G_STRUCT)
+bool requireClose = input.bool(true, "Require close through structure", group=G_STRUCT)
+float mssATR = input.float(0.75, "MSS body / ATR", minval=0.0, step=0.05, group=G_STRUCT)
+bool showInternalStructure = input.bool(false, "Show internal structure", group=G_STRUCT)
+bool showExternalStructure = input.bool(true, "Show external structure", group=G_STRUCT)
+int maxStructureEvents = input.int(80, "Maximum structure events", minval=10, maxval=150, group=G_STRUCT)
+color bullStructureColor = input.color(color.lime, "Bull structure color", group=G_STRUCT)
+color bearStructureColor = input.color(color.red, "Bear structure color", group=G_STRUCT)
+
+float atr = ta.atr(14)
+float candleBody = math.abs(close-open)
+float disp = atr > 0 ? candleBody/atr : 0.0
+
+//=============================================================================
+// 03. LIQUIDITY
+//=============================================================================
+string G_LIQ = "03 Liquidity"
+float eqTolATR = input.float(0.10, "Liquidity clustering tolerance / ATR", minval=0.01, step=0.01, group=G_LIQ)
+bool useSwingLiquidity = input.bool(true, "Internal/external swing liquidity", group=G_LIQ)
+bool usePD = input.bool(true, "Previous day high/low", group=G_LIQ)
+bool usePW = input.bool(true, "Previous week high/low", group=G_LIQ)
+bool usePM = input.bool(true, "Previous month high/low", group=G_LIQ)
+bool useSessionLiquidity = input.bool(true, "Completed session high/low", group=G_LIQ)
+int maxLiquidity = input.int(80, "Maximum liquidity records", minval=20, maxval=150, group=G_LIQ)
+int swingLiquidityMaxAge = input.int(800, "Swing liquidity max age (bars)", minval=20, maxval=5000, group=G_LIQ)
+int sessionLiquidityMaxAge = input.int(300, "Session liquidity max age (bars)", minval=20, maxval=3000, group=G_LIQ)
+bool keepSweptLiquidity = input.bool(false, "Keep swept liquidity visually", group=G_LIQ)
+bool showLiquidityLabels = input.bool(true, "Show liquidity labels", group=G_LIQ)
+color structuralLiquidityColor = input.color(color.silver, "Swing liquidity color", group=G_LIQ)
+color referenceLiquidityColor = input.color(color.orange, "D/W/M liquidity color", group=G_LIQ)
+color sweptLiquidityColor = input.color(color.gray, "Swept liquidity color", group=G_LIQ)
+
+//=============================================================================
+// 04. SESSIONS
+//=============================================================================
+string G_SESSION_TIME = "04 Sessions — Time"
+string sessionTimezone = input.string("Exchange", "Session timezone", options=["Exchange","UTC-2","UTC-1","UTC+0","UTC+1","UTC+2","America/New_York","Europe/London"], group=G_SESSION_TIME)
+string sessionTz = sessionTimezone == "Exchange" ? syminfo.timezone : sessionTimezone
+string asiaSession = input.session("0000-0800:1234567", "Asia session", group=G_SESSION_TIME)
+string londonSession = input.session("0800-1630:1234567", "London session", group=G_SESSION_TIME)
+string nySession = input.session("1330-2000:1234567", "New York session", group=G_SESSION_TIME)
+
+string G_SESSION_VIS = "05 Sessions — Visual"
+bool showAsia = input.bool(true, "Show Asia", group=G_SESSION_VIS)
+bool showLondon = input.bool(true, "Show London", group=G_SESSION_VIS)
+bool showNewYork = input.bool(true, "Show New York", group=G_SESSION_VIS)
+bool showActiveSessionHL = input.bool(true, "Show active session H/L", group=G_SESSION_VIS)
+bool showSessionNames = input.bool(true, "Show session names", group=G_SESSION_VIS)
+color asiaColor = input.color(color.blue, "Asia color", group=G_SESSION_VIS)
+color londonColor = input.color(color.purple, "London color", group=G_SESSION_VIS)
+color newYorkColor = input.color(color.orange, "New York color", group=G_SESSION_VIS)
+
+//=============================================================================
+// 06. FVG / IFVG
+//=============================================================================
+string G_FVG = "06 FVG / IFVG"
+float minGapATR = input.float(0.10, "Minimum gap / ATR", minval=0, step=0.05, group=G_FVG)
+float fvgMitigationPct = input.float(50, "FVG mitigation threshold %", minval=1, maxval=99, step=1, group=G_FVG)
+int maxFVGZones = input.int(25, "Maximum tracked FVG zones", minval=5, maxval=60, group=G_FVG)
+bool requireFVGDisplacement = input.bool(true, "Require displacement", group=G_FVG)
+float fvgDispATR = input.float(0.75, "FVG displacement body / ATR", minval=0, step=0.05, group=G_FVG)
+bool showFVGText = input.bool(false, "Show FVG/IFVG text", group=G_FVG)
+color bullFVGColor = input.color(color.teal, "Bull FVG color", group=G_FVG)
+color bearFVGColor = input.color(color.maroon, "Bear FVG color", group=G_FVG)
+color bullIFVGColor = input.color(color.aqua, "Bull IFVG color", group=G_FVG)
+color bearIFVGColor = input.color(color.fuchsia, "Bear IFVG color", group=G_FVG)
+int fvgTransparency = input.int(88, "FVG/IFVG transparency", minval=0, maxval=100, group=G_FVG)
+
+//=============================================================================
+// 07. ORDER BLOCK / BREAKER
+//=============================================================================
+string G_OB = "07 Order Block / Breaker"
+string obStructureSource = input.string("Either", "OB trigger structure", options=["Internal","External","Either"], group=G_OB)
+float obDispATR = input.float(0.75, "OB displacement body / ATR", minval=0, step=0.05, group=G_OB)
+int obSearchBack = input.int(8, "Max candles to search for OB", minval=1, maxval=30, group=G_OB)
+bool obBodyOnly = input.bool(false, "OB zone = candle body only", group=G_OB)
+float obMitigationPct = input.float(50, "OB mitigation threshold %", minval=1, maxval=99, step=1, group=G_OB)
+int maxOBZones = input.int(20, "Maximum tracked OB zones", minval=5, maxval=50, group=G_OB)
+bool showOBText = input.bool(false, "Show OB/Breaker text", group=G_OB)
+color bullOBColor = input.color(color.green, "Bull OB color", group=G_OB)
+color bearOBColor = input.color(color.red, "Bear OB color", group=G_OB)
+color bullBreakerColor = input.color(color.aqua, "Bull Breaker color", group=G_OB)
+color bearBreakerColor = input.color(color.orange, "Bear Breaker color", group=G_OB)
+int obTransparency = input.int(90, "OB/Breaker transparency", minval=0, maxval=100, group=G_OB)
+
+//=============================================================================
+// 08. PREMIUM / DISCOUNT
+//=============================================================================
+string G_PD = "08 Premium / Discount"
+bool showPDZone = input.bool(true, "Show structural P/D zone", group=G_PD)
+bool showPDText = input.bool(true, "Show Premium / EQ / Discount", group=G_PD)
+color pdZoneColor = input.color(color.gray, "P/D zone color", group=G_PD)
+int pdTransparency = input.int(93, "P/D zone transparency", minval=0, maxval=100, group=G_PD)
+bool showFibLevels = input.bool(true, "Show fib levels", group=G_PD)
+bool showFibLabels = input.bool(false, "Show fib labels", group=G_PD)
+string fibMapping = input.string("Directional", "Fib mapping", options=["Directional","Price scale"], group=G_PD)
+color fibColor = input.color(color.gray, "Fib color", group=G_PD)
+float fib1 = input.float(0.000, "Fib 1", step=0.001, group=G_PD)
+float fib2 = input.float(0.250, "Fib 2", step=0.001, group=G_PD)
+float fib3 = input.float(0.500, "Fib 3", step=0.001, group=G_PD)
+float fib4 = input.float(0.750, "Fib 4", step=0.001, group=G_PD)
+float fib5 = input.float(1.000, "Fib 5", step=0.001, group=G_PD)
+
+//=============================================================================
+// TYPES
+//=============================================================================
+type LiquidityLevel
+    int id
+    float price
+    bool buySide
+    bool active
+    bool swept
+    int createdBar
+    int expiryBar
+    int startTime
+    string source
+    color baseColor
+    line ln
+    label lb
+
+//=============================================================================
+// HELPERS
+//=============================================================================
+float liqTolerance = atr * eqTolATR
+
+f_near(float a, float b, float tol) =>
+    not na(a) and not na(b) and math.abs(a-b) <= tol
+
+f_sessionVisible(int region) =>
+    region == 0 ? showAsia : region == 1 ? showLondon : showNewYork
+
+f_sessionName(int region) =>
+    region == 0 ? "ASIA" : region == 1 ? "LONDON" : "NEW YORK"
+
+f_sessionColor(int region) =>
+    region == 0 ? asiaColor : region == 1 ? londonColor : newYorkColor
+
+f_hideColor(color c) =>
+    color.new(c,100)
+
+f_structText(string ev) =>
+    structureLabelMode == "Full" ? ev :
+     structureLabelMode == "Compact" ?
+       (str.contains(ev,"MSS") ? "MSS" : str.contains(ev,"CHOCH") ? "CH" : "BOS") :
+       ""
+
+f_deleteLiquidity(LiquidityLevel q) =>
+    if not na(q.ln)
+        line.delete(q.ln)
+    if not na(q.lb)
+        label.delete(q.lb)
+
+var array<LiquidityLevel> liquidity = array.new<LiquidityLevel>()
+var int nextLiquidityId = 1
+
+f_hasActiveNear(float price, bool buySide) =>
+    bool found = false
+    if array.size(liquidity) > 0
+        for n=0 to array.size(liquidity)-1
+            LiquidityLevel q = array.get(liquidity,n)
+            if q.active and q.buySide == buySide and f_near(q.price,price,liqTolerance)
+                found := true
+                break
+    found
+
+f_addLiquidity(int id, float price, bool buySide, int createdBar, int expiryBar, int startTime, string source, color baseColor) =>
+    if not na(price) and not f_hasActiveNear(price,buySide)
+        if array.size(liquidity) >= maxLiquidity
+            LiquidityLevel old = array.shift(liquidity)
+            f_deleteLiquidity(old)
+        line ln = line.new(startTime,price,time,price,xloc=xloc.bar_time,extend=extend.none,color=f_hideColor(baseColor))
+        label lb = label.new(time,price,"",xloc=xloc.bar_time,style=label.style_none,size=size.tiny)
+        array.push(liquidity,LiquidityLevel.new(id,price,buySide,true,false,createdBar,expiryBar,startTime,source,baseColor,ln,lb))
+
+f_deactivateSource(string source) =>
+    if array.size(liquidity)>0
+        for n=0 to array.size(liquidity)-1
+            LiquidityLevel q=array.get(liquidity,n)
+            if q.active and q.source==source
+                q.active:=false
+                array.set(liquidity,n,q)
+
+//=============================================================================
+// P01 — CONFIRMED PIVOTS / SHARED STRUCTURE
+//=============================================================================
+float iPH=ta.pivothigh(high,iLen,iLen)
+float iPL=ta.pivotlow(low,iLen,iLen)
+float xPH=ta.pivothigh(high,xLen,xLen)
+float xPL=ta.pivotlow(low,xLen,xLen)
+
+bool newIPH=barstate.isconfirmed and not na(iPH)
+bool newIPL=barstate.isconfirmed and not na(iPL)
+bool newXPH=barstate.isconfirmed and not na(xPH)
+bool newXPL=barstate.isconfirmed and not na(xPL)
+
+var float iHigh=na
+var float iLow=na
+var int iHighBar=na
+var int iLowBar=na
+var int iHighTime=na
+var int iLowTime=na
+var float iPriorHigh=na
+var float iPriorLow=na
+var string iHighClass="NONE"
+var string iLowClass="NONE"
+
+var float xHigh=na
+var float xLow=na
+var int xHighBar=na
+var int xLowBar=na
+var int xHighTime=na
+var int xLowTime=na
+var float xPriorHigh=na
+var float xPriorLow=na
+var string xHighClass="NONE"
+var string xLowClass="NONE"
+
+// Persistent structure break targets.
+var float iTargetHigh=na
+var int iTargetHighBar=na
+var int iTargetHighTime=na
+var bool iHighWaiting=false
+var float iTargetLow=na
+var int iTargetLowBar=na
+var int iTargetLowTime=na
+var bool iLowWaiting=false
+
+var float xTargetHigh=na
+var int xTargetHighBar=na
+var int xTargetHighTime=na
+var bool xHighWaiting=false
+var float xTargetLow=na
+var int xTargetLowBar=na
+var int xTargetLowTime=na
+var bool xLowWaiting=false
+
+// P05 destination checks must see newly confirmed pivots before same-bar new break processing.
+bool destinationBullHigh=false
+bool destinationBearLow=false
+float destinationHigh=na
+float destinationLow=na
+int destinationHighBar=na
+int destinationLowBar=na
+int destinationHighTime=na
+int destinationLowTime=na
+
+// P05 pending structural legs declared before pivot processing.
+var bool pendingBullLeg=false
+var bool pendingBearLeg=false
+var float pendingLow=na
+var int pendingLowBar=na
+var int pendingLowTime=na
+var int pendingBullBreakBar=na
+var string pendingBullEvent="NONE"
+var float pendingHigh=na
+var int pendingHighBar=na
+var int pendingHighTime=na
+var int pendingBearBreakBar=na
+var string pendingBearEvent="NONE"
+
+if newIPH
+    iPriorHigh:=iHigh
+    iHigh:=iPH
+    iHighBar:=bar_index-iLen
+    iHighTime:=time[iLen]
+    iHighClass:=na(iPriorHigh)?"HH":iHigh>iPriorHigh?"HH":"LH"
+    if not iHighWaiting
+        iTargetHigh:=iPH
+        iTargetHighBar:=iHighBar
+        iTargetHighTime:=iHighTime
+        iHighWaiting:=true
+    if useSwingLiquidity
+        f_addLiquidity(nextLiquidityId,iPH,true,bar_index,bar_index+swingLiquidityMaxAge,iHighTime,"INTERNAL_"+iHighClass,structuralLiquidityColor)
+        nextLiquidityId+=1
+
+if newIPL
+    iPriorLow:=iLow
+    iLow:=iPL
+    iLowBar:=bar_index-iLen
+    iLowTime:=time[iLen]
+    iLowClass:=na(iPriorLow)?"HL":iLow>iPriorLow?"HL":"LL"
+    if not iLowWaiting
+        iTargetLow:=iPL
+        iTargetLowBar:=iLowBar
+        iTargetLowTime:=iLowTime
+        iLowWaiting:=true
+    if useSwingLiquidity
+        f_addLiquidity(nextLiquidityId,iPL,false,bar_index,bar_index+swingLiquidityMaxAge,iLowTime,"INTERNAL_"+iLowClass,structuralLiquidityColor)
+        nextLiquidityId+=1
+
+if newXPH
+    xPriorHigh:=xHigh
+    xHigh:=xPH
+    xHighBar:=bar_index-xLen
+    xHighTime:=time[xLen]
+    xHighClass:=na(xPriorHigh)?"HH":xHigh>xPriorHigh?"HH":"LH"
+    if not xHighWaiting
+        xTargetHigh:=xPH
+        xTargetHighBar:=xHighBar
+        xTargetHighTime:=xHighTime
+        xHighWaiting:=true
+    if pendingBullLeg and not na(pendingBullBreakBar) and bar_index>pendingBullBreakBar and not na(pendingLowBar) and xHighBar>pendingLowBar
+        destinationBullHigh:=true
+        destinationHigh:=xPH
+        destinationHighBar:=xHighBar
+        destinationHighTime:=xHighTime
+    if useSwingLiquidity
+        f_addLiquidity(nextLiquidityId,xPH,true,bar_index,bar_index+swingLiquidityMaxAge,xHighTime,"EXTERNAL_"+xHighClass,structuralLiquidityColor)
+        nextLiquidityId+=1
+
+if newXPL
+    xPriorLow:=xLow
+    xLow:=xPL
+    xLowBar:=bar_index-xLen
+    xLowTime:=time[xLen]
+    xLowClass:=na(xPriorLow)?"HL":xLow>xPriorLow?"HL":"LL"
+    if not xLowWaiting
+        xTargetLow:=xPL
+        xTargetLowBar:=xLowBar
+        xTargetLowTime:=xLowTime
+        xLowWaiting:=true
+    if pendingBearLeg and not na(pendingBearBreakBar) and bar_index>pendingBearBreakBar and not na(pendingHighBar) and xLowBar>pendingHighBar
+        destinationBearLow:=true
+        destinationLow:=xPL
+        destinationLowBar:=xLowBar
+        destinationLowTime:=xLowTime
+    if useSwingLiquidity
+        f_addLiquidity(nextLiquidityId,xPL,false,bar_index,bar_index+swingLiquidityMaxAge,xLowTime,"EXTERNAL_"+xLowClass,structuralLiquidityColor)
+        nextLiquidityId+=1
+
+// Structure state.
+var int iTrend=0
+var int xTrend=0
+var float iProtectedLow=na
+var float iProtectedHigh=na
+var float xProtectedLow=na
+var float xProtectedHigh=na
+var int iProtectedLowTime=na
+var int iProtectedHighTime=na
+var int xProtectedLowTime=na
+var int xProtectedHighTime=na
+
+int oldITrend=iTrend
+int oldXTrend=xTrend
+
+bool iBullBreak=barstate.isconfirmed and iHighWaiting and not na(iTargetHigh) and (requireClose?close>iTargetHigh:high>iTargetHigh)
+bool iBearBreak=barstate.isconfirmed and iLowWaiting and not na(iTargetLow) and (requireClose?close<iTargetLow:low<iTargetLow)
+bool xBullBreak=barstate.isconfirmed and xHighWaiting and not na(xTargetHigh) and (requireClose?close>xTargetHigh:high>xTargetHigh)
+bool xBearBreak=barstate.isconfirmed and xLowWaiting and not na(xTargetLow) and (requireClose?close<xTargetLow:low<xTargetLow)
+
+bool iBullMSS=iBullBreak and oldITrend<0 and disp>=mssATR
+bool iBearMSS=iBearBreak and oldITrend>0 and disp>=mssATR
+bool xBullMSS=xBullBreak and oldXTrend<0 and disp>=mssATR
+bool xBearMSS=xBearBreak and oldXTrend>0 and disp>=mssATR
+bool iBullCH=iBullBreak and oldITrend<0 and not iBullMSS
+bool iBearCH=iBearBreak and oldITrend>0 and not iBearMSS
+bool xBullCH=xBullBreak and oldXTrend<0 and not xBullMSS
+bool xBearCH=xBearBreak and oldXTrend>0 and not xBearMSS
+bool iBullBOS=iBullBreak and not iBullCH and not iBullMSS
+bool iBearBOS=iBearBreak and not iBearCH and not iBearMSS
+bool xBullBOS=xBullBreak and not xBullCH and not xBullMSS
+bool xBearBOS=xBearBreak and not xBearCH and not xBearMSS
+
+// Structure event visual queues.
+var line[] structureLines=array.new_line()
+var label[] structureLabels=array.new_label()
+
+f_addStructureEvent(bool enabled, int startTime, float price, string eventText, color c, string kind) =>
+    if enabled and structureLabelMode!="Off" and not na(startTime)
+        ls=kind=="CHOCH"?line.style_dashed:line.style_solid
+        int width=kind=="MSS"?2:1
+        line ln=line.new(startTime,price,time,price,xloc=xloc.bar_time,extend=extend.none,color=c,style=ls,width=width)
+        array.push(structureLines,ln)
+        string txt=structureLabelMode=="Lines only"?"":f_structText(eventText)
+        label lb=label.new(time,price,txt,xloc=xloc.bar_time,style=label.style_none,textcolor=c,size=kind=="MSS"?size.small:size.tiny)
+        array.push(structureLabels,lb)
+        while array.size(structureLines)>maxStructureEvents
+            line.delete(array.shift(structureLines))
+            label.delete(array.shift(structureLabels))
+
+bool showI=showInternalStructure and (modeAnalysis or modeFull)
+bool showX=showExternalStructure and not modeExecution
+
+if iBullBreak
+    string ev=iBullMSS?"iMSS BULL":iBullCH?"iCHoCH BULL":"iBOS BULL"
+    f_addStructureEvent(showI,iTargetHighTime,iTargetHigh,ev,bullStructureColor,iBullMSS?"MSS":iBullCH?"CHOCH":"BOS")
+    iHighWaiting:=false
+    iProtectedLow:=iLow
+    iProtectedLowTime:=iLowTime
+    iTrend:=1
+
+if iBearBreak
+    string ev=iBearMSS?"iMSS BEAR":iBearCH?"iCHoCH BEAR":"iBOS BEAR"
+    f_addStructureEvent(showI,iTargetLowTime,iTargetLow,ev,bearStructureColor,iBearMSS?"MSS":iBearCH?"CHOCH":"BOS")
+    iLowWaiting:=false
+    iProtectedHigh:=iHigh
+    iProtectedHighTime:=iHighTime
+    iTrend:=-1
+
+if xBullBreak
+    string ev=xBullMSS?"xMSS BULL":xBullCH?"xCHoCH BULL":"xBOS BULL"
+    f_addStructureEvent(showX,xTargetHighTime,xTargetHigh,ev,bullStructureColor,xBullMSS?"MSS":xBullCH?"CHOCH":"BOS")
+    xHighWaiting:=false
+    xProtectedLow:=xLow
+    xProtectedLowTime:=xLowTime
+    xTrend:=1
+    pendingBullLeg:=not na(xLow)
+    pendingLow:=xLow
+    pendingLowBar:=xLowBar
+    pendingLowTime:=xLowTime
+    pendingBullBreakBar:=bar_index
+    pendingBullEvent:=xBullMSS?"EXTERNAL_MSS_BULLISH":xBullCH?"EXTERNAL_CHOCH_BULLISH":"EXTERNAL_BOS_BULLISH"
+    pendingBearLeg:=false
+
+if xBearBreak
+    string ev=xBearMSS?"xMSS BEAR":xBearCH?"xCHoCH BEAR":"xBOS BEAR"
+    f_addStructureEvent(showX,xTargetLowTime,xTargetLow,ev,bearStructureColor,xBearMSS?"MSS":xBearCH?"CHOCH":"BOS")
+    xLowWaiting:=false
+    xProtectedHigh:=xHigh
+    xProtectedHighTime:=xHighTime
+    xTrend:=-1
+    pendingBearLeg:=not na(xHigh)
+    pendingHigh:=xHigh
+    pendingHighBar:=xHighBar
+    pendingHighTime:=xHighTime
+    pendingBearBreakBar:=bar_index
+    pendingBearEvent:=xBearMSS?"EXTERNAL_MSS_BEARISH":xBearCH?"EXTERNAL_CHOCH_BEARISH":"EXTERNAL_BOS_BEARISH"
+    pendingBullLeg:=false
+
+//=============================================================================
+// P01 — PREVIOUS D/W/M REFERENCE LIQUIDITY
+// Stable completed higher-period values.
+//=============================================================================
+float pdH=request.security(syminfo.tickerid,"D",high[1],lookahead=barmerge.lookahead_on)
+float pdL=request.security(syminfo.tickerid,"D",low[1],lookahead=barmerge.lookahead_on)
+float pwH=request.security(syminfo.tickerid,"W",high[1],lookahead=barmerge.lookahead_on)
+float pwL=request.security(syminfo.tickerid,"W",low[1],lookahead=barmerge.lookahead_on)
+float pmH=request.security(syminfo.tickerid,"M",high[1],lookahead=barmerge.lookahead_on)
+float pmL=request.security(syminfo.tickerid,"M",low[1],lookahead=barmerge.lookahead_on)
+
+bool newD=ta.change(time("D"))!=0
+bool newW=ta.change(time("W"))!=0
+bool newM=ta.change(time("M"))!=0
+
+if (barstate.isfirst or newD) and usePD
+    f_deactivateSource("PDH")
+    f_deactivateSource("PDL")
+    f_addLiquidity(nextLiquidityId,pdH,true,bar_index,na,time,"PDH",referenceLiquidityColor)
+    nextLiquidityId+=1
+    f_addLiquidity(nextLiquidityId,pdL,false,bar_index,na,time,"PDL",referenceLiquidityColor)
+    nextLiquidityId+=1
+
+if (barstate.isfirst or newW) and usePW
+    f_deactivateSource("PWH")
+    f_deactivateSource("PWL")
+    f_addLiquidity(nextLiquidityId,pwH,true,bar_index,na,time,"PWH",referenceLiquidityColor)
+    nextLiquidityId+=1
+    f_addLiquidity(nextLiquidityId,pwL,false,bar_index,na,time,"PWL",referenceLiquidityColor)
+    nextLiquidityId+=1
+
+if (barstate.isfirst or newM) and usePM
+    f_deactivateSource("PMH")
+    f_deactivateSource("PML")
+    f_addLiquidity(nextLiquidityId,pmH,true,bar_index,na,time,"PMH",referenceLiquidityColor)
+    nextLiquidityId+=1
+    f_addLiquidity(nextLiquidityId,pmL,false,bar_index,na,time,"PML",referenceLiquidityColor)
+    nextLiquidityId+=1
+
+//=============================================================================
+// P04 — SESSION ENGINE
+// Active H/L from session OPEN -> current bar.
+// At close, final H/L become common LiquidityLevel records.
+//=============================================================================
+f_inSession(string s) =>
+    not na(time(timeframe.period,s,sessionTz))
+
+bool asiaIn=f_inSession(asiaSession)
+bool londonIn=f_inSession(londonSession)
+bool nyIn=f_inSession(nySession)
+
+var bool[] sessionActive=array.from(false,false,false)
+var float[] sessionHi=array.new_float(3,na)
+var float[] sessionLo=array.new_float(3,na)
+var int[] sessionStartTime=array.new_int(3,na)
+var int[] sessionHighTime=array.new_int(3,na)
+var int[] sessionLowTime=array.new_int(3,na)
+var line[] sessionHighLine=array.new_line(3)
+var line[] sessionLowLine=array.new_line(3)
+var label[] sessionNameLabel=array.new_label(3)
+
+f_processSession(int idx, bool inside) =>
+    bool was=array.get(sessionActive,idx)
+    color c=f_sessionColor(idx)
+    bool vis=f_sessionVisible(idx) and (modeAnalysis or modeFull)
+    string nm=f_sessionName(idx)
+
+    if inside
+        if not was
+            array.set(sessionActive,idx,true)
+            array.set(sessionHi,idx,high)
+            array.set(sessionLo,idx,low)
+            array.set(sessionStartTime,idx,time)
+            array.set(sessionHighTime,idx,time)
+            array.set(sessionLowTime,idx,time)
+
+            line oldH=array.get(sessionHighLine,idx)
+            line oldL=array.get(sessionLowLine,idx)
+            label oldN=array.get(sessionNameLabel,idx)
+            if not na(oldH)
+                line.delete(oldH)
+            if not na(oldL)
+                line.delete(oldL)
+            if not na(oldN)
+                label.delete(oldN)
+
+            line hLn=line.new(time,high,time,high,xloc=xloc.bar_time,extend=extend.none,color=vis and showActiveSessionHL?c:f_hideColor(c))
+            line lLn=line.new(time,low,time,low,xloc=xloc.bar_time,extend=extend.none,color=vis and showActiveSessionHL?c:f_hideColor(c))
+            label nLb=label.new(time,high,vis and showSessionNames?nm:"",xloc=xloc.bar_time,style=label.style_none,textcolor=c,size=size.tiny)
+            array.set(sessionHighLine,idx,hLn)
+            array.set(sessionLowLine,idx,lLn)
+            array.set(sessionNameLabel,idx,nLb)
+        else
+            if high>array.get(sessionHi,idx)
+                array.set(sessionHi,idx,high)
+                array.set(sessionHighTime,idx,time)
+            if low<array.get(sessionLo,idx)
+                array.set(sessionLo,idx,low)
+                array.set(sessionLowTime,idx,time)
+
+        float hi=array.get(sessionHi,idx)
+        float lo=array.get(sessionLo,idx)
+        int st=array.get(sessionStartTime,idx)
+        line hLn=array.get(sessionHighLine,idx)
+        line lLn=array.get(sessionLowLine,idx)
+        label nLb=array.get(sessionNameLabel,idx)
+        if not na(hLn)
+            line.set_xy1(hLn,st,hi)
+            line.set_xy2(hLn,time,hi)
+            line.set_color(hLn,vis and showActiveSessionHL?c:f_hideColor(c))
+        if not na(lLn)
+            line.set_xy1(lLn,st,lo)
+            line.set_xy2(lLn,time,lo)
+            line.set_color(lLn,vis and showActiveSessionHL?c:f_hideColor(c))
+        if not na(nLb)
+            label.set_xy(nLb,st,hi)
+            label.set_text(nLb,vis and showSessionNames?nm:"")
+            label.set_textcolor(nLb,c)
+
+    else if was and barstate.isconfirmed
+        float finalHi=array.get(sessionHi,idx)
+        float finalLo=array.get(sessionLo,idx)
+        int st=array.get(sessionStartTime,idx)
+
+        line hLn=array.get(sessionHighLine,idx)
+        line lLn=array.get(sessionLowLine,idx)
+        label nLb=array.get(sessionNameLabel,idx)
+        if not na(hLn)
+            line.delete(hLn)
+        if not na(lLn)
+            line.delete(lLn)
+        if not na(nLb)
+            label.delete(nLb)
+        array.set(sessionHighLine,idx,na)
+        array.set(sessionLowLine,idx,na)
+        array.set(sessionNameLabel,idx,na)
+
+        if useSessionLiquidity
+            int sessionHighId=bar_index*10+idx*2+1
+            int sessionLowId=bar_index*10+idx*2+2
+            f_addLiquidity(sessionHighId,finalHi,true,bar_index,bar_index+sessionLiquidityMaxAge,st,nm+"_H",c)
+            f_addLiquidity(sessionLowId,finalLo,false,bar_index,bar_index+sessionLiquidityMaxAge,st,nm+"_L",c)
+
+        array.set(sessionActive,idx,false)
+        array.set(sessionHi,idx,na)
+        array.set(sessionLo,idx,na)
+        array.set(sessionStartTime,idx,na)
+        array.set(sessionHighTime,idx,na)
+        array.set(sessionLowTime,idx,na)
+
+f_processSession(0,asiaIn)
+f_processSession(1,londonIn)
+f_processSession(2,nyIn)
+
+//=============================================================================
+// P01 — COMMON LIQUIDITY LIFECYCLE / SWEEP ENGINE
+//=============================================================================
+bool bullSweep=false
+bool bearSweep=false
+string sweepSource="NONE"
+float sweepPrice=na
+
+if array.size(liquidity)>0
+    for n=0 to array.size(liquidity)-1
+        LiquidityLevel q=array.get(liquidity,n)
+
+        if q.active
+            bool expired=not na(q.expiryBar) and bar_index>q.expiryBar
+            bool swept=barstate.isconfirmed and (q.buySide ? (high>q.price and close<q.price) : (low<q.price and close>q.price))
+
+            if swept
+                q.active:=false
+                q.swept:=true
+                sweepSource:=q.source
+                sweepPrice:=q.price
+                if q.buySide
+                    bearSweep:=true
+                else
+                    bullSweep:=true
+            else if expired
+                q.active:=false
+
+            array.set(liquidity,n,q)
+
+// Setup-state foundation from P01.7.
+var string setupState="NONE"
+var string setupSide="NONE"
+var string setupSource="NONE"
+var int setupBar=na
+int setupLifetime=20
+
+if bullSweep
+    setupState:="SWEEP_ONLY"
+    setupSide:="LONG_CANDIDATE"
+    setupSource:=sweepSource
+    setupBar:=bar_index
+
+if bearSweep
+    setupState:="SWEEP_ONLY"
+    setupSide:="SHORT_CANDIDATE"
+    setupSource:=sweepSource
+    setupBar:=bar_index
+
+bool bullShift=iBullMSS or xBullMSS or iBullCH or xBullCH
+bool bearShift=iBearMSS or xBearMSS or iBearCH or xBearCH
+
+if setupSide=="LONG_CANDIDATE" and bullShift and not na(setupBar) and bar_index>=setupBar
+    setupState:=iBullMSS or xBullMSS?"CONFIRMED_MSS":"CONFIRMED_CHOCH"
+
+if setupSide=="SHORT_CANDIDATE" and bearShift and not na(setupBar) and bar_index>=setupBar
+    setupState:=iBearMSS or xBearMSS?"CONFIRMED_MSS":"CONFIRMED_CHOCH"
+
+if setupSide=="LONG_CANDIDATE" and (iBearBOS or xBearBOS)
+    setupState:="INVALIDATED"
+
+if setupSide=="SHORT_CANDIDATE" and (iBullBOS or xBullBOS)
+    setupState:="INVALIDATED"
+
+if not na(setupBar) and bar_index>setupBar+setupLifetime and (setupState=="SWEEP_ONLY" or setupState=="CONFIRMED_MSS" or setupState=="CONFIRMED_CHOCH")
+    setupState:="EXPIRED"
+
+// Common liquidity rendering.
+if array.size(liquidity)>0
+    for n=0 to array.size(liquidity)-1
+        LiquidityLevel q=array.get(liquidity,n)
+        bool isSession=str.contains(q.source,"ASIA") or str.contains(q.source,"LONDON") or str.contains(q.source,"NEW YORK")
+        bool showBase=modeFull or modeAnalysis or (modeExecution and q.active)
+        bool showQ=showBase and (q.active or (q.swept and keepSweptLiquidity))
+        color c=q.swept?sweptLiquidityColor:q.baseColor
+
+        if not na(q.ln)
+            line.set_x2(q.ln,time)
+            line.set_y1(q.ln,q.price)
+            line.set_y2(q.ln,q.price)
+            line.set_color(q.ln,showQ?c:f_hideColor(c))
+            if q.swept or not q.active
+                line.set_style(q.ln,line.style_dashed)
+
+        if not na(q.lb)
+            label.set_xy(q.lb,time,q.price)
+            label.set_text(q.lb,showQ and showLiquidityLabels?q.source:"")
+            label.set_textcolor(q.lb,c)
+
+//=============================================================================
+// P02 — FVG / IFVG LIFECYCLE
+//=============================================================================
+float bullGap=low-high[2]
+float bearGap=low[2]-high
+bool bullFVG=barstate.isconfirmed and not na(high[2]) and bullGap>0 and bullGap>=atr*minGapATR and (not requireFVGDisplacement or disp>=fvgDispATR)
+bool bearFVG=barstate.isconfirmed and not na(low[2]) and bearGap>0 and bearGap>=atr*minGapATR and (not requireFVGDisplacement or disp>=fvgDispATR)
+
+var float[] fvgTops=array.new_float()
+var float[] fvgBots=array.new_float()
+var int[] fvgDirs=array.new_int()
+var int[] fvgStates=array.new_int()
+var int[] fvgBorn=array.new_int()
+var bool[] fvgMitigated=array.new_bool()
+var box[] fvgBoxes=array.new_box()
+var label[] fvgLabels=array.new_label()
+
+f_addFVG(float top,float bot,int dir) =>
+    if array.size(fvgTops)>=maxFVGZones
+        box.delete(array.shift(fvgBoxes))
+        label.delete(array.shift(fvgLabels))
+        array.shift(fvgTops)
+        array.shift(fvgBots)
+        array.shift(fvgDirs)
+        array.shift(fvgStates)
+        array.shift(fvgBorn)
+        array.shift(fvgMitigated)
+    array.push(fvgTops,top)
+    array.push(fvgBots,bot)
+    array.push(fvgDirs,dir)
+    array.push(fvgStates,0)
+    array.push(fvgBorn,bar_index)
+    array.push(fvgMitigated,false)
+    box b=box.new(time[2],top,time,bot,xloc=xloc.bar_time)
+    array.push(fvgBoxes,b)
+    label l=label.new(time,top,"",xloc=xloc.bar_time,style=label.style_none,size=size.tiny)
+    array.push(fvgLabels,l)
+
+if bullFVG
+    f_addFVG(low,high[2],1)
+if bearFVG
+    f_addFVG(low[2],high,-1)
+
+bool ifvgBullEvent=false
+bool ifvgBearEvent=false
+
+if array.size(fvgTops)>0
+    for n=array.size(fvgTops)-1 to 0
+        float top=array.get(fvgTops,n)
+        float bot=array.get(fvgBots,n)
+        int dir=array.get(fvgDirs,n)
+        int state=array.get(fvgStates,n)
+        int born=array.get(fvgBorn,n)
+
+        if state!=3
+            box.set_right(array.get(fvgBoxes,n),time)
+
+        if barstate.isconfirmed and bar_index>born and state==0
+            float height=math.max(top-bot,syminfo.mintick)
+            float penetration=dir==1?top-low:high-bot
+            float fillPct=math.max(0.0,math.min(100.0,penetration/height*100.0))
+            bool mitigated=fillPct>=fvgMitigationPct
+            bool fullyFilled=fillPct>=100.0
+            bool polarityClose=dir==1?close<bot:close>top
+            if mitigated
+                array.set(fvgMitigated,n,true)
+            if fullyFilled
+                if polarityClose
+                    array.set(fvgStates,n,2)
+                    if dir==1
+                        ifvgBearEvent:=true
+                    else
+                        ifvgBullEvent:=true
+                else
+                    array.set(fvgStates,n,1)
+
+        else if barstate.isconfirmed and bar_index>born and state==1
+            bool polarityClose=dir==1?close<bot:close>top
+            if polarityClose
+                array.set(fvgStates,n,2)
+                if dir==1
+                    ifvgBearEvent:=true
+                else
+                    ifvgBullEvent:=true
+
+        else if barstate.isconfirmed and bar_index>born and state==2
+            bool invalidated=dir==1?close>top:close<bot
+            if invalidated
+                array.set(fvgStates,n,3)
+
+        state:=array.get(fvgStates,n)
+        bool showZone=modeAnalysis or modeFull
+        color zoneColor=state==2?(dir==1?bearIFVGColor:bullIFVGColor):(dir==1?bullFVGColor:bearFVGColor)
+        box.set_bgcolor(array.get(fvgBoxes,n),showZone and state!=3?color.new(zoneColor,fvgTransparency):f_hideColor(zoneColor))
+        box.set_border_color(array.get(fvgBoxes,n),showZone and state!=3?zoneColor:f_hideColor(zoneColor))
+        label.set_xy(array.get(fvgLabels,n),time,top)
+        string txt=state==2?(dir==1?"IFVG ↓":"IFVG ↑"):(dir==1?"FVG ↑":"FVG ↓")
+        label.set_text(array.get(fvgLabels,n),showZone and showFVGText and state!=3?txt:"")
+        label.set_textcolor(array.get(fvgLabels,n),zoneColor)
+
+//=============================================================================
+// P03 — ORDER BLOCK / BREAKER LIFECYCLE
+// Consumes SHARED structure; no duplicate pivot engine.
+//=============================================================================
+bool obBullStruct=obStructureSource=="Internal"?iBullBreak:obStructureSource=="External"?xBullBreak:(iBullBreak or xBullBreak)
+bool obBearStruct=obStructureSource=="Internal"?iBearBreak:obStructureSource=="External"?xBearBreak:(iBearBreak or xBearBreak)
+bool obBullTrigger=barstate.isconfirmed and obBullStruct and disp>=obDispATR
+bool obBearTrigger=barstate.isconfirmed and obBearStruct and disp>=obDispATR
+
+f_findBullCandidate() =>
+    int found=-1
+    for n=1 to obSearchBack
+        if close[n]<open[n]
+            found:=n
+            break
+    found
+
+f_findBearCandidate() =>
+    int found=-1
+    for n=1 to obSearchBack
+        if close[n]>open[n]
+            found:=n
+            break
+    found
+
+int bullCand=obBullTrigger?f_findBullCandidate():-1
+int bearCand=obBearTrigger?f_findBearCandidate():-1
+
+var float[] obTops=array.new_float()
+var float[] obBots=array.new_float()
+var int[] obDirs=array.new_int()
+var int[] obStates=array.new_int()
+var int[] obCreatedBars=array.new_int()
+var bool[] obMitigated=array.new_bool()
+var box[] obBoxes=array.new_box()
+var label[] obLabels=array.new_label()
+
+f_addOB(float top,float bot,int dir,int cand) =>
+    if array.size(obTops)>=maxOBZones
+        box.delete(array.shift(obBoxes))
+        label.delete(array.shift(obLabels))
+        array.shift(obTops)
+        array.shift(obBots)
+        array.shift(obDirs)
+        array.shift(obStates)
+        array.shift(obCreatedBars)
+        array.shift(obMitigated)
+    array.push(obTops,top)
+    array.push(obBots,bot)
+    array.push(obDirs,dir)
+    array.push(obStates,0)
+    array.push(obCreatedBars,bar_index)
+    array.push(obMitigated,false)
+    box b=box.new(time[cand],top,time,bot,xloc=xloc.bar_time)
+    array.push(obBoxes,b)
+    label l=label.new(time[cand],top,"",xloc=xloc.bar_time,style=label.style_none,size=size.tiny)
+    array.push(obLabels,l)
+
+if obBullTrigger and bullCand>0
+    float top=obBodyOnly?math.max(open[bullCand],close[bullCand]):high[bullCand]
+    float bot=obBodyOnly?math.min(open[bullCand],close[bullCand]):low[bullCand]
+    f_addOB(top,bot,1,bullCand)
+
+if obBearTrigger and bearCand>0
+    float top=obBodyOnly?math.max(open[bearCand],close[bearCand]):high[bearCand]
+    float bot=obBodyOnly?math.min(open[bearCand],close[bearCand]):low[bearCand]
+    f_addOB(top,bot,-1,bearCand)
+
+bool bullBreakerEvent=false
+bool bearBreakerEvent=false
+
+if array.size(obTops)>0
+    for n=array.size(obTops)-1 to 0
+        float top=array.get(obTops,n)
+        float bot=array.get(obBots,n)
+        int dir=array.get(obDirs,n)
+        int state=array.get(obStates,n)
+        int born=array.get(obCreatedBars,n)
+
+        if state!=3
+            box.set_right(array.get(obBoxes,n),time)
+
+        if barstate.isconfirmed and bar_index>born and state<=1
+            float height=math.max(top-bot,syminfo.mintick)
+            float penetration=dir==1?top-low:high-bot
+            float fillPct=math.max(0.0,math.min(100.0,penetration/height*100.0))
+            bool mitigated=fillPct>=obMitigationPct
+            bool broken=dir==1?close<bot:close>top
+            if mitigated
+                array.set(obMitigated,n,true)
+                if state==0
+                    array.set(obStates,n,1)
+            if broken
+                array.set(obStates,n,2)
+                if dir==1
+                    bearBreakerEvent:=true
+                else
+                    bullBreakerEvent:=true
+
+        else if barstate.isconfirmed and bar_index>born and state==2
+            bool invalidated=dir==1?close>top:close<bot
+            if invalidated
+                array.set(obStates,n,3)
+
+        state:=array.get(obStates,n)
+        bool showZone=modeAnalysis or modeFull
+        bool breaker=state==2
+        color zoneColor=breaker?(dir==1?bearBreakerColor:bullBreakerColor):(dir==1?bullOBColor:bearOBColor)
+        box.set_bgcolor(array.get(obBoxes,n),showZone and state!=3?color.new(zoneColor,obTransparency):f_hideColor(zoneColor))
+        box.set_border_color(array.get(obBoxes,n),showZone and state!=3?zoneColor:f_hideColor(zoneColor))
+        label.set_xy(array.get(obLabels,n),time,top)
+        string txt=breaker?(dir==1?"BB ↓":"BB ↑"):(dir==1?"OB ↑":"OB ↓")
+        label.set_text(array.get(obLabels,n),showZone and showOBText and state!=3?txt:"")
+        label.set_textcolor(array.get(obLabels,n),zoneColor)
+
+//=============================================================================
+// P05.1 — STRUCTURE-ANCHORED PREMIUM / DISCOUNT
+// Consumes shared external structure. No duplicate pivot/structure engine.
+//=============================================================================
+bool newPDZone=false
+bool newBullPD=false
+bool newBearPD=false
+float newPDHigh=na
+float newPDLow=na
+int newPDHighTime=na
+int newPDLowTime=na
+int newPDDirection=0
+string newPDSource="NONE"
+
+// Finalize a pending leg BEFORE a same-bar break starts a new one.
+if destinationBullHigh and not na(pendingLow) and destinationHigh>pendingLow
+    newPDZone:=true
+    newBullPD:=true
+    newPDHigh:=destinationHigh
+    newPDLow:=pendingLow
+    newPDHighTime:=destinationHighTime
+    newPDLowTime:=pendingLowTime
+    newPDDirection:=1
+    newPDSource:=pendingBullEvent
+    pendingBullLeg:=false
+
+if destinationBearLow and not na(pendingHigh) and pendingHigh>destinationLow
+    newPDZone:=true
+    newBullPD:=false
+    newBearPD:=true
+    newPDHigh:=pendingHigh
+    newPDLow:=destinationLow
+    newPDHighTime:=pendingHighTime
+    newPDLowTime:=destinationLowTime
+    newPDDirection:=-1
+    newPDSource:=pendingBearEvent
+    pendingBearLeg:=false
+
+var float pdZoneHigh=na
+var float pdZoneLow=na
+var int pdZoneLeftTime=na
+var int pdZoneDirection=0
+var string pdZoneSource="NONE"
+var int pdZoneVersion=0
+
+var box pdBox=na
+var line pdFib1=na
+var line pdFib2=na
+var line pdFib3=na
+var line pdFib4=na
+var line pdFib5=na
+var label pdPremium=na
+var label pdEq=na
+var label pdDiscount=na
+var label pdFibLabel1=na
+var label pdFibLabel2=na
+var label pdFibLabel3=na
+var label pdFibLabel4=na
+var label pdFibLabel5=na
+
+f_pdPrice(float level) =>
+    float span=pdZoneHigh-pdZoneLow
+    fibMapping=="Directional"?(pdZoneDirection==1?pdZoneLow+span*level:pdZoneHigh-span*level):pdZoneLow+span*level
+
+if newPDZone
+    if not na(pdBox)
+        box.delete(pdBox)
+    if not na(pdFib1)
+        line.delete(pdFib1)
+        line.delete(pdFib2)
+        line.delete(pdFib3)
+        line.delete(pdFib4)
+        line.delete(pdFib5)
+    if not na(pdPremium)
+        label.delete(pdPremium)
+        label.delete(pdEq)
+        label.delete(pdDiscount)
+        label.delete(pdFibLabel1)
+        label.delete(pdFibLabel2)
+        label.delete(pdFibLabel3)
+        label.delete(pdFibLabel4)
+        label.delete(pdFibLabel5)
+
+    pdZoneHigh:=newPDHigh
+    pdZoneLow:=newPDLow
+    pdZoneLeftTime:=math.min(newPDHighTime,newPDLowTime)
+    pdZoneDirection:=newPDDirection
+    pdZoneSource:=newPDSource
+    pdZoneVersion+=1
+
+    float p1=f_pdPrice(fib1)
+    float p2=f_pdPrice(fib2)
+    float p3=f_pdPrice(fib3)
+    float p4=f_pdPrice(fib4)
+    float p5=f_pdPrice(fib5)
+
+    pdBox:=box.new(pdZoneLeftTime,pdZoneHigh,time,pdZoneLow,xloc=xloc.bar_time)
+    pdFib1:=line.new(pdZoneLeftTime,p1,time,p1,xloc=xloc.bar_time,extend=extend.none)
+    pdFib2:=line.new(pdZoneLeftTime,p2,time,p2,xloc=xloc.bar_time,extend=extend.none)
+    pdFib3:=line.new(pdZoneLeftTime,p3,time,p3,xloc=xloc.bar_time,extend=extend.none,style=line.style_dashed)
+    pdFib4:=line.new(pdZoneLeftTime,p4,time,p4,xloc=xloc.bar_time,extend=extend.none)
+    pdFib5:=line.new(pdZoneLeftTime,p5,time,p5,xloc=xloc.bar_time,extend=extend.none)
+
+    pdPremium:=label.new(time,pdZoneLow+(pdZoneHigh-pdZoneLow)*0.78,"",xloc=xloc.bar_time,style=label.style_none,size=size.small)
+    pdEq:=label.new(time,pdZoneLow+(pdZoneHigh-pdZoneLow)*0.50,"",xloc=xloc.bar_time,style=label.style_none,size=size.small)
+    pdDiscount:=label.new(time,pdZoneLow+(pdZoneHigh-pdZoneLow)*0.22,"",xloc=xloc.bar_time,style=label.style_none,size=size.small)
+
+    pdFibLabel1:=label.new(time,p1,"",xloc=xloc.bar_time,style=label.style_none,size=size.tiny)
+    pdFibLabel2:=label.new(time,p2,"",xloc=xloc.bar_time,style=label.style_none,size=size.tiny)
+    pdFibLabel3:=label.new(time,p3,"",xloc=xloc.bar_time,style=label.style_none,size=size.tiny)
+    pdFibLabel4:=label.new(time,p4,"",xloc=xloc.bar_time,style=label.style_none,size=size.tiny)
+    pdFibLabel5:=label.new(time,p5,"",xloc=xloc.bar_time,style=label.style_none,size=size.tiny)
+
+bool pdAvailable=not na(pdZoneHigh) and not na(pdZoneLow) and pdZoneHigh>pdZoneLow
+if pdAvailable
+    bool pdVisible=(modeAnalysis or modeFull) and showPDZone
+    color zc=pdZoneColor
+    float p1=f_pdPrice(fib1)
+    float p2=f_pdPrice(fib2)
+    float p3=f_pdPrice(fib3)
+    float p4=f_pdPrice(fib4)
+    float p5=f_pdPrice(fib5)
+
+    box.set_right(pdBox,time)
+    box.set_bgcolor(pdBox,pdVisible?color.new(zc,pdTransparency):f_hideColor(zc))
+    box.set_border_color(pdBox,pdVisible?zc:f_hideColor(zc))
+
+    color fc=pdVisible and showFibLevels?fibColor:f_hideColor(fibColor)
+    line.set_xy2(pdFib1,time,p1)
+    line.set_xy2(pdFib2,time,p2)
+    line.set_xy2(pdFib3,time,p3)
+    line.set_xy2(pdFib4,time,p4)
+    line.set_xy2(pdFib5,time,p5)
+    line.set_color(pdFib1,fc)
+    line.set_color(pdFib2,fc)
+    line.set_color(pdFib3,fc)
+    line.set_color(pdFib4,fc)
+    line.set_color(pdFib5,fc)
+
+    label.set_xy(pdPremium,time,pdZoneLow+(pdZoneHigh-pdZoneLow)*0.78)
+    label.set_xy(pdEq,time,pdZoneLow+(pdZoneHigh-pdZoneLow)*0.50)
+    label.set_xy(pdDiscount,time,pdZoneLow+(pdZoneHigh-pdZoneLow)*0.22)
+    label.set_text(pdPremium,pdVisible and showPDText?"PREMIUM":"")
+    label.set_text(pdEq,pdVisible and showPDText?"EQ":"")
+    label.set_text(pdDiscount,pdVisible and showPDText?"DISCOUNT":"")
+
+    label.set_xy(pdFibLabel1,time,p1)
+    label.set_xy(pdFibLabel2,time,p2)
+    label.set_xy(pdFibLabel3,time,p3)
+    label.set_xy(pdFibLabel4,time,p4)
+    label.set_xy(pdFibLabel5,time,p5)
+    label.set_text(pdFibLabel1,pdVisible and showFibLabels?str.tostring(fib1,"#.###"):"")
+    label.set_text(pdFibLabel2,pdVisible and showFibLabels?str.tostring(fib2,"#.###"):"")
+    label.set_text(pdFibLabel3,pdVisible and showFibLabels?str.tostring(fib3,"#.###"):"")
+    label.set_text(pdFibLabel4,pdVisible and showFibLabels?str.tostring(fib4,"#.###"):"")
+    label.set_text(pdFibLabel5,pdVisible and showFibLabels?str.tostring(fib5,"#.###"):"")
+
+//=============================================================================
+// DIAGNOSTIC PANEL — ONE MASTER TABLE
+//=============================================================================
+int activeLiq=0
+int sweptLiq=0
+if array.size(liquidity)>0
+    for n=0 to array.size(liquidity)-1
+        LiquidityLevel q=array.get(liquidity,n)
+        if q.active
+            activeLiq+=1
+        if q.swept
+            sweptLiq+=1
+
+int activeFVG=0
+int activeIFVG=0
+if array.size(fvgStates)>0
+    for n=0 to array.size(fvgStates)-1
+        int s=array.get(fvgStates,n)
+        if s==0 or s==1
+            activeFVG+=1
+        if s==2
+            activeIFVG+=1
+
+int activeOB=0
+int activeBB=0
+if array.size(obStates)>0
+    for n=0 to array.size(obStates)-1
+        int s=array.get(obStates,n)
+        if s==0 or s==1
+            activeOB+=1
+        if s==2
+            activeBB+=1
+
+var table diag=table.new(position.top_right,2,16)
+if barstate.islast
+    table.clear(diag,0,0,1,15)
+    if diagnostic
+        table.cell(diag,0,0,"ARTHA MASTER")
+        table.cell(diag,1,0,"v0.1 P01–P05")
+        table.cell(diag,0,1,"Display")
+        table.cell(diag,1,1,displayMode)
+        table.cell(diag,0,2,"Internal trend")
+        table.cell(diag,1,2,iTrend==1?"BULL":iTrend==-1?"BEAR":"NEUTRAL")
+        table.cell(diag,0,3,"External trend")
+        table.cell(diag,1,3,xTrend==1?"BULL":xTrend==-1?"BEAR":"NEUTRAL")
+        table.cell(diag,0,4,"Liquidity A / swept")
+        table.cell(diag,1,4,str.tostring(activeLiq)+" / "+str.tostring(sweptLiq))
+        table.cell(diag,0,5,"Last sweep")
+        table.cell(diag,1,5,sweepSource)
+        table.cell(diag,0,6,"Setup state")
+        table.cell(diag,1,6,setupState)
+        table.cell(diag,0,7,"Setup side")
+        table.cell(diag,1,7,setupSide)
+        table.cell(diag,0,8,"FVG / IFVG")
+        table.cell(diag,1,8,str.tostring(activeFVG)+" / "+str.tostring(activeIFVG))
+        table.cell(diag,0,9,"OB / BB")
+        table.cell(diag,1,9,str.tostring(activeOB)+" / "+str.tostring(activeBB))
+        table.cell(diag,0,10,"P/D")
+        table.cell(diag,1,10,pdAvailable?(pdZoneDirection==1?"BULL":"BEAR")+" #"+str.tostring(pdZoneVersion):"NONE")
+        table.cell(diag,0,11,"P/D source")
+        table.cell(diag,1,11,pdZoneSource)
+        table.cell(diag,0,12,"Asia")
+        table.cell(diag,1,12,asiaIn?"ACTIVE":"CLOSED")
+        table.cell(diag,0,13,"London")
+        table.cell(diag,1,13,londonIn?"ACTIVE":"CLOSED")
+        table.cell(diag,0,14,"New York")
+        table.cell(diag,1,14,nyIn?"ACTIVE":"CLOSED")
+        table.cell(diag,0,15,"Displacement")
+        table.cell(diag,1,15,str.tostring(disp,"#.##"))
+
+//=============================================================================
+// ALERTABLE EVENTS — CONTEXT ONLY, NOT ENTRY SIGNALS
+//=============================================================================
+alertcondition(bullSweep,"ARTHA Bullish Liquidity Sweep","Confirmed sell-side liquidity sweep")
+alertcondition(bearSweep,"ARTHA Bearish Liquidity Sweep","Confirmed buy-side liquidity sweep")
+alertcondition(iBullBOS or xBullBOS,"ARTHA Bullish BOS","Confirmed bullish BOS")
+alertcondition(iBearBOS or xBearBOS,"ARTHA Bearish BOS","Confirmed bearish BOS")
+alertcondition(iBullCH or xBullCH,"ARTHA Bullish CHoCH","Confirmed bullish CHoCH")
+alertcondition(iBearCH or xBearCH,"ARTHA Bearish CHoCH","Confirmed bearish CHoCH")
+alertcondition(iBullMSS or xBullMSS,"ARTHA Bullish MSS","Confirmed bullish MSS")
+alertcondition(iBearMSS or xBearMSS,"ARTHA Bearish MSS","Confirmed bearish MSS")
+alertcondition(bullFVG,"ARTHA Bullish FVG","Confirmed bullish FVG created")
+alertcondition(bearFVG,"ARTHA Bearish FVG","Confirmed bearish FVG created")
+alertcondition(ifvgBullEvent,"ARTHA Bullish IFVG","Confirmed bullish IFVG")
+alertcondition(ifvgBearEvent,"ARTHA Bearish IFVG","Confirmed bearish IFVG")
+alertcondition(bullBreakerEvent,"ARTHA Bullish Breaker","Confirmed bullish breaker")
+alertcondition(bearBreakerEvent,"ARTHA Bearish Breaker","Confirmed bearish breaker")
+alertcondition(newPDZone and newBullPD,"ARTHA Bullish P/D Range","New bullish structural dealing range")
+alertcondition(newPDZone and newBearPD,"ARTHA Bearish P/D Range","New bearish structural dealing range")
