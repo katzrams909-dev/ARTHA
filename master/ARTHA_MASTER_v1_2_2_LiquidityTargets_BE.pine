@@ -1,0 +1,3161 @@
+//@version=6
+indicator("ARTHA MASTER v1.2.2 — Liquidity Targets + BE", shorttitle="ARTHA M1.2.2", overlay=true, max_lines_count=500, max_boxes_count=300, max_labels_count=500)
+
+//=============================================================================
+// ARTHA MASTER v0.2
+// P01–P05 integrated market/context core + provisional causal signal engine.
+// Calculations are independent from display settings.
+//=============================================================================
+
+//=============================================================================
+// 01 GLOBAL DISPLAY
+//=============================================================================
+string G01="01 Global Display"
+string displayMode=input.string("Analysis","Display mode",options=["Execution","Analysis","Full"],group=G01)
+bool diagnostic=input.bool(false,"Diagnostic panel",group=G01)
+string textSizeChoice=input.string("Small","Global text size",options=["Tiny","Small","Normal"],group=G01)
+
+bool modeExecution=displayMode=="Execution"
+bool modeAnalysis=displayMode=="Analysis"
+bool modeFull=displayMode=="Full"
+
+f_textSize() =>
+    textSizeChoice=="Tiny"?size.tiny:textSizeChoice=="Normal"?size.normal:size.small
+
+f_hidden(color c) =>
+    color.new(c,100)
+
+//=============================================================================
+// 02 STRUCTURE
+//=============================================================================
+string G02="02 Structure"
+int iLen=input.int(2,"Internal pivot strength",minval=1,group=G02)
+int xLen=input.int(5,"External pivot strength",minval=2,group=G02)
+bool requireClose=input.bool(true,"Require close through structure",group=G02)
+float mssATR=input.float(0.75,"MSS body / ATR",minval=0.0,step=0.05,group=G02)
+bool showStructureEvents=input.bool(true,"Show structure events",group=G02)
+bool showInternalStructure=input.bool(false,"Show internal structure",group=G02)
+bool showExternalStructure=input.bool(true,"Show external structure",group=G02)
+string structureLabelMode=input.string("Compact","Structure labels",options=["Compact","Full","Lines only","Off"],group=G02)
+int maxStructureEvents=input.int(80,"Maximum visible structure events",minval=10,maxval=150,group=G02)
+color bullStructureColor=input.color(color.lime,"Bull structure color",group=G02)
+color bearStructureColor=input.color(color.red,"Bear structure color",group=G02)
+
+float atr=ta.atr(14)
+float candleBody=math.abs(close-open)
+float disp=atr>0?candleBody/atr:0.0
+
+//=============================================================================
+// 03 LIQUIDITY
+//=============================================================================
+string G03="03 Liquidity"
+float eqTolATR=input.float(0.10,"Clustering tolerance / ATR",minval=0.01,step=0.01,group=G03)
+bool trackSwingLiquidity=input.bool(true,"Track swing liquidity",group=G03)
+bool showSwingLiquidity=input.bool(false,"Show swing liquidity",group=G03)
+bool usePD=input.bool(true,"Previous day H/L",group=G03)
+bool usePW=input.bool(true,"Previous week H/L",group=G03)
+bool usePM=input.bool(true,"Previous month H/L",group=G03)
+bool useSessionLiquidity=input.bool(true,"Completed session H/L",group=G03)
+bool showReferenceLiquidity=input.bool(true,"Show D/W/M liquidity",group=G03)
+bool showSessionLiquidity=input.bool(true,"Show completed session liquidity",group=G03)
+bool showLiquidityLabels=input.bool(true,"Show liquidity labels",group=G03)
+bool keepSweptLiquidity=input.bool(false,"Keep swept levels visually",group=G03)
+bool keepResolvedLiquidity=input.bool(false,"Keep breakout/resolved levels visually",group=G03)
+int maxLiquidity=input.int(100,"Maximum liquidity records",minval=20,maxval=180,group=G03)
+int swingLiquidityMaxAge=input.int(500,"Swing liquidity max age (bars)",minval=20,maxval=5000,group=G03)
+int sessionLiquidityMaxAge=input.int(240,"Session liquidity max age (bars)",minval=10,maxval=3000,group=G03)
+color swingLiquidityColor=input.color(color.silver,"Swing liquidity color",group=G03)
+color referenceLiquidityColor=input.color(color.orange,"D/W/M liquidity color",group=G03)
+color sweptLiquidityColor=input.color(color.gray,"Swept liquidity color",group=G03)
+color resolvedLiquidityColor=input.color(color.gray,"Resolved liquidity color",group=G03)
+
+//=============================================================================
+// 04 SESSIONS — TIME
+//=============================================================================
+string G04="04 Sessions — Time"
+string sessionTimezone=input.string("Exchange","Session timezone",options=["Exchange","UTC-2","UTC-1","UTC+0","UTC+1","UTC+2","America/New_York","Europe/London"],group=G04)
+string sessionTz=sessionTimezone=="Exchange"?syminfo.timezone:sessionTimezone
+string asiaSession=input.session("0000-0800:1234567","Asia session",group=G04)
+string londonSession=input.session("0800-1630:1234567","London session",group=G04)
+string newYorkSession=input.session("1330-2000:1234567","New York session",group=G04)
+
+//=============================================================================
+// 05 SESSIONS — VISUALS
+//=============================================================================
+string G05="05 Sessions — Visuals"
+bool showSessionRanges=input.bool(true,"Show session range boxes",group=G05)
+bool keepCompletedSessionRanges=input.bool(true,"Keep recent completed session boxes",group=G05)
+int maxCompletedSessionRanges=input.int(6,"Maximum completed session boxes",minval=0,maxval=30,group=G05)
+bool showActiveSessionHL=input.bool(true,"Show active session H/L",group=G05)
+bool showSessionNames=input.bool(true,"Show session names",group=G05)
+bool showAsia=input.bool(true,"Show Asia",group=G05)
+bool showLondon=input.bool(true,"Show London",group=G05)
+bool showNewYork=input.bool(true,"Show New York",group=G05)
+color asiaColor=input.color(color.blue,"Asia color",group=G05)
+color londonColor=input.color(color.purple,"London color",group=G05)
+color newYorkColor=input.color(color.orange,"New York color",group=G05)
+int sessionBoxTransparency=input.int(94,"Session box transparency",minval=0,maxval=100,group=G05)
+
+//=============================================================================
+// 06 FVG / IFVG
+//=============================================================================
+string G06="06 FVG / IFVG"
+bool showFVGZones=input.bool(true,"Show FVG",group=G06)
+bool showIFVGZones=input.bool(true,"Show IFVG",group=G06)
+bool showFVGText=input.bool(true,"Show FVG/IFVG labels inside boxes",group=G06)
+float minGapATR=input.float(0.10,"Minimum gap / ATR",minval=0,step=0.05,group=G06)
+bool showMitigationState=input.bool(true,"Show mitigation state / depth",group=G06)
+bool requireFVGDisplacement=input.bool(true,"Require displacement",group=G06)
+float fvgDispATR=input.float(0.75,"Displacement body / ATR",minval=0,step=0.05,group=G06)
+string ifvgFlipMode=input.string("Close beyond boundary","IFVG flip confirmation",options=["Close beyond boundary","Full body beyond boundary"],group=G06)
+bool retireFVGOnFullWickFill=input.bool(true,"Retire FVG on full wick traversal",group=G06)
+bool retireIFVGOnFullWickFill=input.bool(true,"Retire IFVG on full wick traversal",group=G06)
+int maxFVGZones=input.int(25,"Maximum tracked FVG zones",minval=5,maxval=60,group=G06)
+color bullFVGColor=input.color(color.teal,"Bull FVG color",group=G06)
+color bearFVGColor=input.color(color.maroon,"Bear FVG color",group=G06)
+color bullIFVGColor=input.color(color.aqua,"Bull IFVG color",group=G06)
+color bearIFVGColor=input.color(color.fuchsia,"Bear IFVG color",group=G06)
+int fvgTransparency=input.int(88,"FVG/IFVG transparency",minval=0,maxval=100,group=G06)
+
+//=============================================================================
+// 07 ORDER BLOCK / BREAKER
+//=============================================================================
+string G07="07 Order Block / Breaker"
+bool showOBZones=input.bool(true,"Show Order Blocks",group=G07)
+bool showBreakerZones=input.bool(true,"Show Breaker Blocks",group=G07)
+bool showOBText=input.bool(true,"Show OB/BB labels inside boxes",group=G07)
+string obStructureSource=input.string("Either","OB trigger structure",options=["Internal","External","Either"],group=G07)
+float obDispATR=input.float(0.75,"OB displacement body / ATR",minval=0,step=0.05,group=G07)
+bool requireFVGForOB=input.bool(false,"Require same-direction FVG with OB break",group=G07)
+int obSearchBack=input.int(8,"Max candles to search for OB",minval=1,maxval=30,group=G07)
+bool obBodyOnly=input.bool(false,"OB zone = candle body only",group=G07)
+float obMitigationPct=input.float(50,"OB/BB mean threshold %",minval=1,maxval=99,step=1,group=G07)
+bool showOBMitigationState=input.bool(true,"Show OB/BB mitigation state",group=G07)
+bool breakerRequireLiquiditySweep=input.bool(true,"Breaker requires prior liquidity sweep",group=G07)
+float breakerDispATR=input.float(0.75,"Breaker failure displacement / ATR",minval=0,step=0.05,group=G07)
+int breakerMaxAge=input.int(40,"Max bars OB → Breaker",minval=5,maxval=200,group=G07)
+int obVisualMaxAge=input.int(150,"Max visual age for active OB/BB (bars)",minval=20,maxval=1000,group=G07)
+bool retireOBOnFullWickFill=input.bool(true,"Retire OB on full wick traversal",group=G07)
+bool retireBBOnFullWickFill=input.bool(true,"Retire BB on full wick traversal",group=G07)
+int maxOBZones=input.int(20,"Maximum tracked OB zones",minval=5,maxval=50,group=G07)
+color bullOBColor=input.color(color.green,"Bull OB color",group=G07)
+color bearOBColor=input.color(color.red,"Bear OB color",group=G07)
+color bullBreakerColor=input.color(color.aqua,"Bull Breaker color",group=G07)
+color bearBreakerColor=input.color(color.orange,"Bear Breaker color",group=G07)
+int obTransparency=input.int(90,"OB/Breaker transparency",minval=0,maxval=100,group=G07)
+
+//=============================================================================
+// 08 PREMIUM / DISCOUNT
+//=============================================================================
+string G08="08 Premium / Discount"
+bool showPDZone=input.bool(true,"Show structural P/D zone",group=G08)
+bool showPDText=input.bool(true,"Show Premium / EQ / Discount",group=G08)
+bool invalidatePDOnOppositeBreak=input.bool(true,"Invalidate P/D on opposite external break",group=G08)
+color pdZoneColor=input.color(color.gray,"P/D zone color",group=G08)
+int pdTransparency=input.int(94,"P/D zone transparency",minval=0,maxval=100,group=G08)
+bool showFibLevels=input.bool(true,"Show fib levels",group=G08)
+bool showFibLabels=input.bool(false,"Show fib labels",group=G08)
+string fibMapping=input.string("Directional","Fib mapping",options=["Directional","Price scale"],group=G08)
+color fibColor=input.color(color.gray,"Fib color",group=G08)
+float fib1=input.float(0.000,"Fib 1",step=0.001,group=G08)
+float fib2=input.float(0.250,"Fib 2",step=0.001,group=G08)
+float fib3=input.float(0.500,"Fib 3",step=0.001,group=G08)
+float fib4=input.float(0.750,"Fib 4",step=0.001,group=G08)
+float fib5=input.float(1.000,"Fib 5",step=0.001,group=G08)
+
+//=============================================================================
+// 09 PROVISIONAL SIGNAL ENGINE
+//=============================================================================
+string G08B="08B HTF / MTF Bias"
+string G08C="08C VWAP Context"
+string G08D="08D Divergence Context"
+string G08E="08E Signal Scoring"
+string G08F="08F Unified Dashboard"
+string G08G="08G Risk / Trade Projection"
+string G09="09 Test Signal Engine"
+bool enableBiasEngine=input.bool(true,"Enable HTF/MTF bias engine",group=G08B)
+string htfBiasTF=input.timeframe("240","HTF bias timeframe",group=G08B)
+string mtfBiasTF=input.timeframe("60","MTF bias timeframe",group=G08B)
+int biasPivotLen=input.int(3,"Bias pivot length",minval=1,maxval=10,group=G08B)
+string biasFilterMode=input.string("Align only","Signal bias filter",options=["Off","Align only","Countertrend allowed"],group=G08B)
+bool requireMTFAlignment=input.bool(false,"Require MTF to align with HTF",group=G08B)
+bool showBiasPanel=input.bool(true,"Show bias panel",group=G08B)
+bool showBiasBackground=input.bool(false,"Show chart bias background",group=G08B)
+
+bool enableVWAPContext=input.bool(true,"Enable VWAP context",group=G08C)
+bool showSessionVWAP=input.bool(true,"Show session VWAP",group=G08C)
+bool showDailyVWAP=input.bool(true,"Show daily VWAP",group=G08C)
+bool showWeeklyVWAP=input.bool(false,"Show weekly VWAP",group=G08C)
+bool showMonthlyVWAP=input.bool(false,"Show monthly VWAP",group=G08C)
+string vwapFilterMode=input.string("Off","Signal VWAP filter",options=["Off","Daily align","Session + Daily align"],group=G08C)
+bool showVWAPPanel=input.bool(true,"Show VWAP panel",group=G08C)
+color sessionVWAPColor=input.color(color.aqua,"Session VWAP color",group=G08C)
+color dailyVWAPColor=input.color(color.yellow,"Daily VWAP color",group=G08C)
+color weeklyVWAPColor=input.color(color.orange,"Weekly VWAP color",group=G08C)
+color monthlyVWAPColor=input.color(color.fuchsia,"Monthly VWAP color",group=G08C)
+
+bool enableDivergenceContext=input.bool(true,"Enable divergence context",group=G08D)
+bool enableRSIDivergence=input.bool(true,"Enable RSI divergence",group=G08D)
+bool enableMACDDivergence=input.bool(true,"Enable MACD divergence",group=G08D)
+int divergencePivotLen=input.int(3,"Divergence pivot length",minval=1,maxval=10,group=G08D)
+int divergenceMaxBars=input.int(60,"Maximum bars between divergence pivots",minval=5,maxval=200,group=G08D)
+bool showDivergenceMarkers=input.bool(true,"Show divergence markers",group=G08D)
+bool showDivergencePanel=input.bool(true,"Show divergence panel",group=G08D)
+string divergenceFilterMode=input.string("Off","Signal divergence filter",options=["Off","Any supportive divergence","Require momentum divergence"],group=G08D)
+color bullDivColor=input.color(color.lime,"Bullish divergence color",group=G08D)
+color bearDivColor=input.color(color.red,"Bearish divergence color",group=G08D)
+
+bool enableSignalScoring=input.bool(true,"Enable signal scoring",group=G08E)
+string scoreFilterMode=input.string("Off","Score filter",options=["Off","Minimum score"],group=G08E)
+int minimumSignalScore=input.int(60,"Minimum signal score",minval=0,maxval=100,group=G08E)
+bool showScoreOnLabels=input.bool(true,"Show score on signal labels",group=G08E)
+bool showScorePanel=input.bool(true,"Show score panel",group=G08E)
+
+bool showUnifiedDashboard=input.bool(true,"Show unified dashboard",group=G08F)
+string dashboardMode=input.string("Compact","Dashboard mode",options=["Compact","Full","Diagnostic"],group=G08F)
+string dashboardTextSize=input.string("Small","Dashboard text size",options=["Tiny","Small","Normal"],group=G08F)
+string dashboardPosition=input.string("Top Right","Dashboard position",options=["Top Right","Bottom Right","Top Left","Bottom Left"],group=G08F)
+bool replaceMiniPanels=input.bool(true,"Replace individual context panels",group=G08F)
+
+bool enableRiskProjection=input.bool(true,"Enable risk projection",group=G08G)
+string stopLossMode=input.string("POI boundary","Stop loss mode",options=["POI boundary","Signal candle","ATR"],group=G08G)
+float stopATRBuffer=input.float(0.15,"POI stop ATR buffer",minval=0.0,step=0.05,group=G08G)
+float atrStopMultiple=input.float(1.0,"ATR stop multiple",minval=0.1,step=0.1,group=G08G)
+string targetMode=input.string("Hybrid","Target mode",options=["Hybrid","Liquidity only","R-Multiple only"],group=G08G)
+float tp1R=input.float(1.0,"TP1 fallback / minimum R",minval=0.25,step=0.25,group=G08G)
+float tp2R=input.float(2.0,"TP2 fallback / minimum R",minval=0.5,step=0.25,group=G08G)
+float tp3R=input.float(3.0,"TP3 fallback / minimum R",minval=0.75,step=0.25,group=G08G)
+string breakEvenMode=input.string("After TP1","Break-even mode",options=["Off","After TP1","After 1R","After TP2","Custom R"],group=G08G)
+float breakEvenCustomR=input.float(1.0,"Custom BE trigger R",minval=0.25,step=0.25,group=G08G)
+float breakEvenOffsetR=input.float(0.0,"BE offset (R)",minval=0.0,maxval=1.0,step=0.05,group=G08G)
+int riskProjectionBars=input.int(50,"Projection length (bars)",minval=5,maxval=200,group=G08G)
+bool showRiskLines=input.bool(true,"Show Entry / SL / TP lines",group=G08G)
+bool deleteRiskOnCompletion=input.bool(true,"Delete risk lines when completed",group=G08G)
+
+bool enableTestSignals=input.bool(true,"Enable test signal engine",group=G09)
+string signalSensitivity=input.string("Balanced","Signal sensitivity",options=["Strict","Balanced","Diagnostic"],group=G09)
+bool showSignalLabels=input.bool(true,"Show test signal labels",group=G09)
+bool signalUseFVG=input.bool(true,"Allow FVG/IFVG POI",group=G09)
+bool signalUseOB=input.bool(true,"Allow OB/Breaker POI",group=G09)
+bool requireSignalPDLocation=input.bool(false,"Require Discount/Premium location",group=G09)
+bool requireInternalShift=input.bool(false,"Require internal CHoCH/MSS",group=G09)
+bool allowExternalShift=input.bool(true,"Allow external CHoCH/MSS",group=G09)
+bool allowResolvedLiquidityOrigins=input.bool(false,"Allow close-through liquidity resolutions as origins",group=G09)
+bool enableContinuationSignals=input.bool(true,"Enable POI-first continuation signals",group=G09)
+bool continuationUseFVG=input.bool(true,"Continuation: allow FVG",group=G09)
+bool continuationUseOB=input.bool(true,"Continuation: allow OB",group=G09)
+int continuationConfirmWindow=input.int(12,"Continuation BOS confirmation window (bars)",minval=1,maxval=50,group=G09)
+int continuationRetestWindow=input.int(20,"Continuation POI retest window (bars)",minval=1,maxval=80,group=G09)
+string continuationReaction=input.string("Mitigation reclaim","Continuation POI confirmation",options=["Mitigation reclaim","Boundary sweep reclaim","Directional close","Touch only"],group=G09)
+bool enableInversionSignals=input.bool(true,"Enable inversion signals",group=G09)
+bool inversionUseIFVG=input.bool(true,"Inversion: allow IFVG",group=G09)
+bool inversionUseBB=input.bool(true,"Inversion: allow BB",group=G09)
+int inversionConfirmWindow=input.int(12,"Inversion structure confirmation window (bars)",minval=1,maxval=50,group=G09)
+int inversionRetestWindow=input.int(20,"Inversion POI retest window (bars)",minval=1,maxval=80,group=G09)
+string inversionStructure=input.string("CHoCH/MSS","Inversion structure confirmation",options=["CHoCH/MSS","Any structure break"],group=G09)
+string inversionReaction=input.string("Mitigation reclaim","Inversion POI confirmation",options=["Mitigation reclaim","Boundary sweep reclaim","Directional close","Touch only"],group=G09)
+float signalDispATR=input.float(0.60,"Required displacement body / ATR",minval=0,step=0.05,group=G09)
+int signalDispWindow=input.int(6,"Bars allowed: sweep → displacement",minval=1,maxval=30,group=G09)
+int signalShiftWindow=input.int(6,"Bars allowed: displacement → CHoCH/MSS",minval=1,maxval=30,group=G09)
+int signalPOIWindow=input.int(15,"Bars allowed: shift → POI selection",minval=1,maxval=50,group=G09)
+int signalRetestWindow=input.int(20,"Bars allowed: POI selection → retest",minval=1,maxval=100,group=G09)
+string signalRetestMode=input.string("Mitigation reclaim","POI confirmation",options=["Mitigation reclaim","Boundary sweep reclaim","Directional close","Midpoint reaction","Touch only"],group=G09)
+bool invalidateOnOppositeBOS=input.bool(true,"Invalidate candidate on opposite BOS",group=G09)
+bool resetOnNewSameSideSweep=input.bool(false,"Refresh candidate on newer same-side sweep",group=G09)
+bool showSignalStages=input.bool(false,"Show SWP/DSP/SHIFT/POI stage markers",group=G09)
+bool showHistoricalSignalAudit=input.bool(false,"Show historical signal rejection markers",group=G09)
+int maxSignalLabels=input.int(60,"Maximum TEST signal labels",minval=10,maxval=150,group=G09)
+int maxStageLabels=input.int(80,"Maximum signal-stage labels",minval=10,maxval=200,group=G09)
+color longSignalColor=input.color(color.lime,"LONG signal color",group=G09)
+color shortSignalColor=input.color(color.red,"SHORT signal color",group=G09)
+
+//=============================================================================
+// TYPES + HELPERS
+//=============================================================================
+type LiquidityLevel
+    int id
+    float price
+    bool buySide
+    int state          // 0 ACTIVE, 1 SWEPT, 2 RESOLVED, 3 EXPIRED, 4 SUPERSEDED
+    int createdBar
+    int terminalBar
+    int expiryBar
+    int startTime
+    int endTime
+    string source
+    int category       // 0 swing, 1 D/W/M, 2 session
+    color baseColor
+    line ln
+    label lb
+
+float liqTolerance=atr*eqTolATR
+var array<LiquidityLevel> liquidity=array.new<LiquidityLevel>()
+var int nextLiquidityId=1
+
+f_near(float a,float b,float tol) =>
+    not na(a) and not na(b) and math.abs(a-b)<=tol
+
+f_sessionVisible(int region) =>
+    region==0?showAsia:region==1?showLondon:showNewYork
+
+f_sessionName(int region) =>
+    region==0?"ASIA":region==1?"LONDON":"NEW YORK"
+
+f_sessionColor(int region) =>
+    region==0?asiaColor:region==1?londonColor:newYorkColor
+
+f_liqCategoryVisible(int cat) =>
+    cat==0?showSwingLiquidity:cat==1?showReferenceLiquidity:showSessionLiquidity
+
+f_hasActiveSwingNear(float price,bool buySide) =>
+    bool found=false
+    if array.size(liquidity)>0
+        for n=0 to array.size(liquidity)-1
+            LiquidityLevel q=array.get(liquidity,n)
+            // Clustering is deliberately limited to swing liquidity.
+            // Named references (PDH/PDL/PWH/PWL/PMH/PML) and session H/L
+            // must always retain their own identity even when prices overlap.
+            if q.state==0 and q.category==0 and q.buySide==buySide and f_near(q.price,price,liqTolerance)
+                found:=true
+                break
+    found
+
+f_deleteLiquidity(LiquidityLevel q) =>
+    if not na(q.ln)
+        line.delete(q.ln)
+    if not na(q.lb)
+        label.delete(q.lb)
+
+f_addLiquidity(int id,float price,bool buySide,int createdBar,int expiryBar,int startTime,string source,int category,color baseColor) =>
+    bool duplicateSwing = category==0 and f_hasActiveSwingNear(price,buySide)
+    if not na(price) and not duplicateSwing
+        if array.size(liquidity)>=maxLiquidity
+            LiquidityLevel old=array.shift(liquidity)
+            f_deleteLiquidity(old)
+        line ln=line.new(startTime,price,time,price,xloc=xloc.bar_time,extend=extend.none,color=f_hidden(baseColor))
+        label lb=label.new(time,price,"",xloc=xloc.bar_time,style=label.style_none,size=f_textSize())
+        array.push(liquidity,LiquidityLevel.new(id,price,buySide,0,createdBar,na,expiryBar,startTime,na,source,category,baseColor,ln,lb))
+
+f_supersedeSource(string source) =>
+    if array.size(liquidity)>0
+        for n=0 to array.size(liquidity)-1
+            LiquidityLevel q=array.get(liquidity,n)
+            if q.state==0 and q.source==source
+                q.state:=4
+                q.terminalBar:=bar_index
+                q.endTime:=time
+                array.set(liquidity,n,q)
+
+//=============================================================================
+// P01 SHARED PIVOTS / STRUCTURE
+//=============================================================================
+float iPH=ta.pivothigh(high,iLen,iLen)
+float iPL=ta.pivotlow(low,iLen,iLen)
+float xPH=ta.pivothigh(high,xLen,xLen)
+float xPL=ta.pivotlow(low,xLen,xLen)
+
+bool newIPH=barstate.isconfirmed and not na(iPH)
+bool newIPL=barstate.isconfirmed and not na(iPL)
+bool newXPH=barstate.isconfirmed and not na(xPH)
+bool newXPL=barstate.isconfirmed and not na(xPL)
+
+var float iHigh=na
+var float iLow=na
+var int iHighBar=na
+var int iLowBar=na
+var int iHighTime=na
+var int iLowTime=na
+var float iPriorHigh=na
+var float iPriorLow=na
+var string iHighClass="NONE"
+var string iLowClass="NONE"
+
+var float xHigh=na
+var float xLow=na
+var int xHighBar=na
+var int xLowBar=na
+var int xHighTime=na
+var int xLowTime=na
+var float xPriorHigh=na
+var float xPriorLow=na
+var string xHighClass="NONE"
+var string xLowClass="NONE"
+
+var float iTargetHigh=na
+var int iTargetHighTime=na
+var bool iHighWaiting=false
+var float iTargetLow=na
+var int iTargetLowTime=na
+var bool iLowWaiting=false
+var float xTargetHigh=na
+var int xTargetHighTime=na
+var bool xHighWaiting=false
+var float xTargetLow=na
+var int xTargetLowTime=na
+var bool xLowWaiting=false
+
+// P/D pending legs exist before destination detection.
+var bool pendingBullLeg=false
+var bool pendingBearLeg=false
+var float pendingLow=na
+var int pendingLowBar=na
+var int pendingLowTime=na
+var int pendingBullBreakBar=na
+var string pendingBullEvent="NONE"
+var float pendingHigh=na
+var int pendingHighBar=na
+var int pendingHighTime=na
+var int pendingBearBreakBar=na
+var string pendingBearEvent="NONE"
+
+bool destinationBullHigh=false
+bool destinationBearLow=false
+float destinationHigh=na
+float destinationLow=na
+int destinationHighTime=na
+int destinationLowTime=na
+
+if newIPH
+    iPriorHigh:=iHigh
+    iHigh:=iPH
+    iHighBar:=bar_index-iLen
+    iHighTime:=time[iLen]
+    iHighClass:=na(iPriorHigh)?"HH":iHigh>iPriorHigh?"HH":"LH"
+    if not iHighWaiting
+        iTargetHigh:=iPH
+        iTargetHighTime:=iHighTime
+        iHighWaiting:=true
+    if trackSwingLiquidity
+        f_addLiquidity(nextLiquidityId,iPH,true,bar_index,bar_index+swingLiquidityMaxAge,iHighTime,"i"+iHighClass,0,swingLiquidityColor)
+        nextLiquidityId+=1
+
+if newIPL
+    iPriorLow:=iLow
+    iLow:=iPL
+    iLowBar:=bar_index-iLen
+    iLowTime:=time[iLen]
+    iLowClass:=na(iPriorLow)?"HL":iLow>iPriorLow?"HL":"LL"
+    if not iLowWaiting
+        iTargetLow:=iPL
+        iTargetLowTime:=iLowTime
+        iLowWaiting:=true
+    if trackSwingLiquidity
+        f_addLiquidity(nextLiquidityId,iPL,false,bar_index,bar_index+swingLiquidityMaxAge,iLowTime,"i"+iLowClass,0,swingLiquidityColor)
+        nextLiquidityId+=1
+
+if newXPH
+    xPriorHigh:=xHigh
+    xHigh:=xPH
+    xHighBar:=bar_index-xLen
+    xHighTime:=time[xLen]
+    xHighClass:=na(xPriorHigh)?"HH":xHigh>xPriorHigh?"HH":"LH"
+    if not xHighWaiting
+        xTargetHigh:=xPH
+        xTargetHighTime:=xHighTime
+        xHighWaiting:=true
+    if pendingBullLeg and not na(pendingBullBreakBar) and bar_index>pendingBullBreakBar and not na(pendingLowBar) and xHighBar>pendingLowBar
+        destinationBullHigh:=true
+        destinationHigh:=xPH
+        destinationHighTime:=xHighTime
+    if trackSwingLiquidity
+        f_addLiquidity(nextLiquidityId,xPH,true,bar_index,bar_index+swingLiquidityMaxAge,xHighTime,"x"+xHighClass,0,swingLiquidityColor)
+        nextLiquidityId+=1
+
+if newXPL
+    xPriorLow:=xLow
+    xLow:=xPL
+    xLowBar:=bar_index-xLen
+    xLowTime:=time[xLen]
+    xLowClass:=na(xPriorLow)?"HL":xLow>xPriorLow?"HL":"LL"
+    if not xLowWaiting
+        xTargetLow:=xPL
+        xTargetLowTime:=xLowTime
+        xLowWaiting:=true
+    if pendingBearLeg and not na(pendingBearBreakBar) and bar_index>pendingBearBreakBar and not na(pendingHighBar) and xLowBar>pendingHighBar
+        destinationBearLow:=true
+        destinationLow:=xPL
+        destinationLowTime:=xLowTime
+    if trackSwingLiquidity
+        f_addLiquidity(nextLiquidityId,xPL,false,bar_index,bar_index+swingLiquidityMaxAge,xLowTime,"x"+xLowClass,0,swingLiquidityColor)
+        nextLiquidityId+=1
+
+//=============================================================================
+// P05 DEALING RANGE — FINALIZE OLD PENDING LEG BEFORE NEW BREAK MUTATES IT
+//=============================================================================
+bool newPDZone=false
+bool newBullPD=false
+bool newBearPD=false
+float newPDHigh=na
+float newPDLow=na
+int newPDHighTime=na
+int newPDLowTime=na
+int newPDDirection=0
+string newPDSource="NONE"
+
+if destinationBullHigh and not na(pendingLow) and destinationHigh>pendingLow
+    newPDZone:=true
+    newBullPD:=true
+    newPDHigh:=destinationHigh
+    newPDLow:=pendingLow
+    newPDHighTime:=destinationHighTime
+    newPDLowTime:=pendingLowTime
+    newPDDirection:=1
+    newPDSource:=pendingBullEvent
+    pendingBullLeg:=false
+
+if destinationBearLow and not na(pendingHigh) and pendingHigh>destinationLow
+    newPDZone:=true
+    newBullPD:=false
+    newBearPD:=true
+    newPDHigh:=pendingHigh
+    newPDLow:=destinationLow
+    newPDHighTime:=pendingHighTime
+    newPDLowTime:=destinationLowTime
+    newPDDirection:=-1
+    newPDSource:=pendingBearEvent
+    pendingBearLeg:=false
+
+//=============================================================================
+// STRUCTURE BREAKS + EVENTS
+//=============================================================================
+var int iTrend=0
+var int xTrend=0
+var float iProtectedLow=na
+var float iProtectedHigh=na
+var float xProtectedLow=na
+var float xProtectedHigh=na
+var int iProtectedLowTime=na
+var int iProtectedHighTime=na
+var int xProtectedLowTime=na
+var int xProtectedHighTime=na
+
+int oldITrend=iTrend
+int oldXTrend=xTrend
+
+bool iBullBreak=barstate.isconfirmed and iHighWaiting and not na(iTargetHigh) and (requireClose?close>iTargetHigh:high>iTargetHigh)
+bool iBearBreak=barstate.isconfirmed and iLowWaiting and not na(iTargetLow) and (requireClose?close<iTargetLow:low<iTargetLow)
+bool xBullBreak=barstate.isconfirmed and xHighWaiting and not na(xTargetHigh) and (requireClose?close>xTargetHigh:high>xTargetHigh)
+bool xBearBreak=barstate.isconfirmed and xLowWaiting and not na(xTargetLow) and (requireClose?close<xTargetLow:low<xTargetLow)
+
+bool iBullMSS=iBullBreak and oldITrend<0 and disp>=mssATR
+bool iBearMSS=iBearBreak and oldITrend>0 and disp>=mssATR
+bool xBullMSS=xBullBreak and oldXTrend<0 and disp>=mssATR
+bool xBearMSS=xBearBreak and oldXTrend>0 and disp>=mssATR
+bool iBullCH=iBullBreak and oldITrend<0 and not iBullMSS
+bool iBearCH=iBearBreak and oldITrend>0 and not iBearMSS
+bool xBullCH=xBullBreak and oldXTrend<0 and not xBullMSS
+bool xBearCH=xBearBreak and oldXTrend>0 and not xBearMSS
+bool iBullBOS=iBullBreak and not iBullCH and not iBullMSS
+bool iBearBOS=iBearBreak and not iBearCH and not iBearMSS
+bool xBullBOS=xBullBreak and not xBullCH and not xBullMSS
+bool xBearBOS=xBearBreak and not xBearCH and not xBearMSS
+
+var line[] structureLines=array.new_line()
+var label[] structureLabels=array.new_label()
+var int internalBOSCount=0
+var int internalCHCount=0
+var int internalMSSCount=0
+var int externalBOSCount=0
+var int externalCHCount=0
+var int externalMSSCount=0
+
+f_structureText(string scope,string kind,bool bullish) =>
+    structureLabelMode=="Full"?scope+" "+kind+(bullish?" ↑":" ↓"):kind=="CHOCH"?"CHoCH":kind
+
+f_addStructureVisual(bool enabled,int swingTime,float price,string scope,string kind,bool bullish,color c) =>
+    if enabled and structureLabelMode!="Off" and not na(swingTime) and not na(price)
+        line ln=line.new(swingTime,price,time,price,xloc=xloc.bar_time,extend=extend.none,color=c,style=kind=="CHOCH"?line.style_dashed:line.style_solid,width=kind=="MSS"?2:1)
+        array.push(structureLines,ln)
+        string labelText=structureLabelMode=="Lines only"?"":f_structureText(scope,kind,bullish)
+        int midTime=swingTime+(time-swingTime)/2
+        label lb=label.new(midTime,price,labelText,xloc=xloc.bar_time,style=label.style_none,textcolor=c,size=f_textSize())
+        array.push(structureLabels,lb)
+        while array.size(structureLines)>maxStructureEvents
+            line.delete(array.shift(structureLines))
+            label.delete(array.shift(structureLabels))
+
+// Visibility is controlled by explicit structure inputs.
+// Execution mode no longer silently hides external structure.
+bool renderInternal=showStructureEvents and showInternalStructure
+bool renderExternal=showStructureEvents and showExternalStructure
+
+if iBullBreak
+    string kind=iBullMSS?"MSS":iBullCH?"CHOCH":"BOS"
+    f_addStructureVisual(renderInternal,iTargetHighTime,iTargetHigh,"i",kind,true,bullStructureColor)
+    if iBullMSS
+        internalMSSCount+=1
+    else if iBullCH
+        internalCHCount+=1
+    else
+        internalBOSCount+=1
+    iHighWaiting:=false
+    iProtectedLow:=iLow
+    iProtectedLowTime:=iLowTime
+    iTrend:=1
+
+if iBearBreak
+    string kind=iBearMSS?"MSS":iBearCH?"CHOCH":"BOS"
+    f_addStructureVisual(renderInternal,iTargetLowTime,iTargetLow,"i",kind,false,bearStructureColor)
+    if iBearMSS
+        internalMSSCount+=1
+    else if iBearCH
+        internalCHCount+=1
+    else
+        internalBOSCount+=1
+    iLowWaiting:=false
+    iProtectedHigh:=iHigh
+    iProtectedHighTime:=iHighTime
+    iTrend:=-1
+
+if xBullBreak
+    string kind=xBullMSS?"MSS":xBullCH?"CHOCH":"BOS"
+    f_addStructureVisual(renderExternal,xTargetHighTime,xTargetHigh,"x",kind,true,bullStructureColor)
+    if xBullMSS
+        externalMSSCount+=1
+    else if xBullCH
+        externalCHCount+=1
+    else
+        externalBOSCount+=1
+    xHighWaiting:=false
+    xProtectedLow:=xLow
+    xProtectedLowTime:=xLowTime
+    xTrend:=1
+    pendingBullLeg:=not na(xLow)
+    pendingLow:=xLow
+    pendingLowBar:=xLowBar
+    pendingLowTime:=xLowTime
+    pendingBullBreakBar:=bar_index
+    pendingBullEvent:=xBullMSS?"EXTERNAL_MSS_BULLISH":xBullCH?"EXTERNAL_CHOCH_BULLISH":"EXTERNAL_BOS_BULLISH"
+    pendingBearLeg:=false
+
+if xBearBreak
+    string kind=xBearMSS?"MSS":xBearCH?"CHOCH":"BOS"
+    f_addStructureVisual(renderExternal,xTargetLowTime,xTargetLow,"x",kind,false,bearStructureColor)
+    if xBearMSS
+        externalMSSCount+=1
+    else if xBearCH
+        externalCHCount+=1
+    else
+        externalBOSCount+=1
+    xLowWaiting:=false
+    xProtectedHigh:=xHigh
+    xProtectedHighTime:=xHighTime
+    xTrend:=-1
+    pendingBearLeg:=not na(xHigh)
+    pendingHigh:=xHigh
+    pendingHighBar:=xHighBar
+    pendingHighTime:=xHighTime
+    pendingBearBreakBar:=bar_index
+    pendingBearEvent:=xBearMSS?"EXTERNAL_MSS_BEARISH":xBearCH?"EXTERNAL_CHOCH_BEARISH":"EXTERNAL_BOS_BEARISH"
+    pendingBullLeg:=false
+
+//=============================================================================
+// PREVIOUS D/W/M LIQUIDITY
+//=============================================================================
+float pdH=request.security(syminfo.tickerid,"D",high[1],lookahead=barmerge.lookahead_on)
+float pdL=request.security(syminfo.tickerid,"D",low[1],lookahead=barmerge.lookahead_on)
+float pwH=request.security(syminfo.tickerid,"W",high[1],lookahead=barmerge.lookahead_on)
+float pwL=request.security(syminfo.tickerid,"W",low[1],lookahead=barmerge.lookahead_on)
+float pmH=request.security(syminfo.tickerid,"M",high[1],lookahead=barmerge.lookahead_on)
+float pmL=request.security(syminfo.tickerid,"M",low[1],lookahead=barmerge.lookahead_on)
+
+bool newD=ta.change(time("D"))!=0
+bool newW=ta.change(time("W"))!=0
+bool newM=ta.change(time("M"))!=0
+
+if (barstate.isfirst or newD) and usePD
+    f_supersedeSource("PDH")
+    f_supersedeSource("PDL")
+    f_addLiquidity(nextLiquidityId,pdH,true,bar_index,na,time,"PDH",1,referenceLiquidityColor)
+    nextLiquidityId+=1
+    f_addLiquidity(nextLiquidityId,pdL,false,bar_index,na,time,"PDL",1,referenceLiquidityColor)
+    nextLiquidityId+=1
+
+if (barstate.isfirst or newW) and usePW
+    f_supersedeSource("PWH")
+    f_supersedeSource("PWL")
+    f_addLiquidity(nextLiquidityId,pwH,true,bar_index,na,time,"PWH",1,referenceLiquidityColor)
+    nextLiquidityId+=1
+    f_addLiquidity(nextLiquidityId,pwL,false,bar_index,na,time,"PWL",1,referenceLiquidityColor)
+    nextLiquidityId+=1
+
+if (barstate.isfirst or newM) and usePM
+    f_supersedeSource("PMH")
+    f_supersedeSource("PML")
+    f_addLiquidity(nextLiquidityId,pmH,true,bar_index,na,time,"PMH",1,referenceLiquidityColor)
+    nextLiquidityId+=1
+    f_addLiquidity(nextLiquidityId,pmL,false,bar_index,na,time,"PML",1,referenceLiquidityColor)
+    nextLiquidityId+=1
+
+//=============================================================================
+// P04 SESSION ENGINE — VISIBLE RANGE BOX + LIVE H/L
+//=============================================================================
+f_inSession(string sessionString) =>
+    not na(time(timeframe.period,sessionString,sessionTz))
+
+bool asiaIn=f_inSession(asiaSession)
+bool londonIn=f_inSession(londonSession)
+bool nyIn=f_inSession(newYorkSession)
+
+var bool[] sessionActive=array.from(false,false,false)
+var float[] sessionHi=array.new_float(3,na)
+var float[] sessionLo=array.new_float(3,na)
+var int[] sessionStartTime=array.new_int(3,na)
+var line[] currentSessionHiLines=array.new_line(3)
+var line[] currentSessionLoLines=array.new_line(3)
+var box[] currentSessionBoxes=array.new_box(3)
+var label[] currentSessionLabels=array.new_label(3)
+var box[] completedSessionBoxes=array.new_box()
+var int[] completedSessionRegions=array.new_int()
+
+f_processSession(int idx,bool inside,int firstLiquidityId) =>
+    int createdLiquidityCount=0
+    bool was=array.get(sessionActive,idx)
+    bool regionVisible=f_sessionVisible(idx)
+    bool visualVisible=regionVisible and (modeAnalysis or modeFull)
+    color c=f_sessionColor(idx)
+    string nm=f_sessionName(idx)
+
+    if inside
+        if not was
+            array.set(sessionActive,idx,true)
+            array.set(sessionHi,idx,high)
+            array.set(sessionLo,idx,low)
+            array.set(sessionStartTime,idx,time)
+
+            line hLine=line.new(time,high,time,high,xloc=xloc.bar_time,extend=extend.none,color=visualVisible and showActiveSessionHL?c:f_hidden(c))
+            line lLine=line.new(time,low,time,low,xloc=xloc.bar_time,extend=extend.none,color=visualVisible and showActiveSessionHL?c:f_hidden(c))
+            box b=box.new(time,high,time,low,xloc=xloc.bar_time,border_color=visualVisible and showSessionRanges?c:f_hidden(c),bgcolor=visualVisible and showSessionRanges?color.new(c,sessionBoxTransparency):f_hidden(c))
+            label lb=label.new(time,(high+low)/2,visualVisible and showSessionNames?nm:"",xloc=xloc.bar_time,style=label.style_none,textcolor=c,size=f_textSize())
+            array.set(currentSessionHiLines,idx,hLine)
+            array.set(currentSessionLoLines,idx,lLine)
+            array.set(currentSessionBoxes,idx,b)
+            array.set(currentSessionLabels,idx,lb)
+        else
+            float oldHi=array.get(sessionHi,idx)
+            float oldLo=array.get(sessionLo,idx)
+            if high>oldHi
+                array.set(sessionHi,idx,high)
+            if low<oldLo
+                array.set(sessionLo,idx,low)
+
+        float hi=array.get(sessionHi,idx)
+        float lo=array.get(sessionLo,idx)
+        int st=array.get(sessionStartTime,idx)
+        line hLine=array.get(currentSessionHiLines,idx)
+        line lLine=array.get(currentSessionLoLines,idx)
+        box b=array.get(currentSessionBoxes,idx)
+        label lb=array.get(currentSessionLabels,idx)
+
+        line.set_xy1(hLine,st,hi)
+        line.set_xy2(hLine,time,hi)
+        line.set_color(hLine,visualVisible and showActiveSessionHL?c:f_hidden(c))
+        line.set_xy1(lLine,st,lo)
+        line.set_xy2(lLine,time,lo)
+        line.set_color(lLine,visualVisible and showActiveSessionHL?c:f_hidden(c))
+
+        box.set_lefttop(b,st,hi)
+        box.set_rightbottom(b,time,lo)
+        box.set_border_color(b,visualVisible and showSessionRanges?c:f_hidden(c))
+        box.set_bgcolor(b,visualVisible and showSessionRanges?color.new(c,sessionBoxTransparency):f_hidden(c))
+
+        label.set_xy(lb,st+(time-st)/2,(hi+lo)/2)
+        label.set_text(lb,visualVisible and showSessionNames?nm:"")
+        label.set_textcolor(lb,c)
+
+    else if was and barstate.isconfirmed
+        float finalHi=array.get(sessionHi,idx)
+        float finalLo=array.get(sessionLo,idx)
+        int st=array.get(sessionStartTime,idx)
+        line hLine=array.get(currentSessionHiLines,idx)
+        line lLine=array.get(currentSessionLoLines,idx)
+        box b=array.get(currentSessionBoxes,idx)
+        label lb=array.get(currentSessionLabels,idx)
+
+        line.delete(hLine)
+        line.delete(lLine)
+        label.delete(lb)
+
+        if keepCompletedSessionRanges and maxCompletedSessionRanges>0
+            array.push(completedSessionBoxes,b)
+            array.push(completedSessionRegions,idx)
+            while array.size(completedSessionBoxes)>maxCompletedSessionRanges
+                box.delete(array.shift(completedSessionBoxes))
+                array.shift(completedSessionRegions)
+        else
+            box.delete(b)
+
+        if useSessionLiquidity
+            f_addLiquidity(firstLiquidityId,finalHi,true,bar_index,bar_index+sessionLiquidityMaxAge,st,nm+" H",2,c)
+            f_addLiquidity(firstLiquidityId+1,finalLo,false,bar_index,bar_index+sessionLiquidityMaxAge,st,nm+" L",2,c)
+            createdLiquidityCount:=2
+
+        array.set(currentSessionHiLines,idx,na)
+        array.set(currentSessionLoLines,idx,na)
+        array.set(currentSessionBoxes,idx,na)
+        array.set(currentSessionLabels,idx,na)
+        array.set(sessionActive,idx,false)
+        array.set(sessionHi,idx,na)
+        array.set(sessionLo,idx,na)
+        array.set(sessionStartTime,idx,na)
+
+    createdLiquidityCount
+
+int asiaCreated=f_processSession(0,asiaIn,nextLiquidityId)
+nextLiquidityId+=asiaCreated
+
+int londonCreated=f_processSession(1,londonIn,nextLiquidityId)
+nextLiquidityId+=londonCreated
+
+int nyCreated=f_processSession(2,nyIn,nextLiquidityId)
+nextLiquidityId+=nyCreated
+
+if array.size(completedSessionBoxes)>0
+    for n=0 to array.size(completedSessionBoxes)-1
+        box b=array.get(completedSessionBoxes,n)
+        int region=array.get(completedSessionRegions,n)
+        color c=f_sessionColor(region)
+        bool vis=f_sessionVisible(region) and (modeAnalysis or modeFull) and showSessionRanges and keepCompletedSessionRanges
+        box.set_border_color(b,vis?c:f_hidden(c))
+        box.set_bgcolor(b,vis?color.new(c,sessionBoxTransparency):f_hidden(c))
+
+//=============================================================================
+// COMMON LIQUIDITY LIFECYCLE
+// Sweep = wick through + close back.
+// Resolve = confirmed close through.
+// All terminal states stop line extension immediately.
+//=============================================================================
+bool bullSweep=false
+bool bearSweep=false
+bool bullResolvedEvent=false
+bool bearResolvedEvent=false
+string latestSweepSource="NONE"
+float latestSweepPrice=na
+string latestResolvedSource="NONE"
+float latestResolvedPrice=na
+
+if array.size(liquidity)>0
+    for n=0 to array.size(liquidity)-1
+        LiquidityLevel q=array.get(liquidity,n)
+
+        if q.state==0
+            bool expired=not na(q.expiryBar) and bar_index>q.expiryBar
+            bool sweep=barstate.isconfirmed and (q.buySide?(high>q.price and close<q.price):(low<q.price and close>q.price))
+            bool resolved=barstate.isconfirmed and (q.buySide?close>q.price:close<q.price)
+
+            if sweep
+                q.state:=1
+                q.terminalBar:=bar_index
+                q.endTime:=time
+                latestSweepSource:=q.source
+                latestSweepPrice:=q.price
+                if q.buySide
+                    bearSweep:=true
+                else
+                    bullSweep:=true
+            else if resolved
+                q.state:=2
+                q.terminalBar:=bar_index
+                q.endTime:=time
+                latestResolvedSource:=q.source
+                latestResolvedPrice:=q.price
+                if q.buySide
+                    bullResolvedEvent:=true
+                else
+                    bearResolvedEvent:=true
+            else if expired
+                q.state:=3
+                q.terminalBar:=bar_index
+                q.endTime:=time
+
+            array.set(liquidity,n,q)
+
+        bool terminal=q.state!=0
+        bool stateVisible=q.state==0 or (q.state==1 and keepSweptLiquidity) or (q.state==2 and keepResolvedLiquidity)
+        bool categoryVisible=f_liqCategoryVisible(q.category)
+        bool modeVisible=modeFull or modeAnalysis or (modeExecution and q.state==0 and q.category!=0)
+        bool visible=stateVisible and categoryVisible and modeVisible
+        color c=q.state==1?sweptLiquidityColor:q.state==2?resolvedLiquidityColor:q.baseColor
+
+        if not na(q.ln)
+            int x2=terminal and not na(q.endTime)?q.endTime:time
+            line.set_xy2(q.ln,x2,q.price)
+            line.set_color(q.ln,visible?c:f_hidden(c))
+            line.set_style(q.ln,terminal?line.style_dashed:line.style_solid)
+        if not na(q.lb)
+            int lx=terminal and not na(q.endTime)?q.endTime:time
+            label.set_xy(q.lb,lx,q.price)
+            label.set_text(q.lb,visible and showLiquidityLabels?q.source:"")
+            label.set_textcolor(q.lb,c)
+
+//=============================================================================
+// P02 FVG / IFVG LIFECYCLE
+//=============================================================================
+float bullGap=low-high[2]
+float bearGap=low[2]-high
+bool bullFVG=barstate.isconfirmed and not na(high[2]) and bullGap>0 and bullGap>=atr*minGapATR and (not requireFVGDisplacement or disp>=fvgDispATR)
+bool bearFVG=barstate.isconfirmed and not na(low[2]) and bearGap>0 and bearGap>=atr*minGapATR and (not requireFVGDisplacement or disp>=fvgDispATR)
+
+var float[] fvgTops=array.new_float()
+var float[] fvgBots=array.new_float()
+var int[] fvgDirs=array.new_int()
+var int[] fvgStates=array.new_int()
+var bool[] fvgMitigated=array.new_bool()
+var bool[] ifvgMitigated=array.new_bool()
+var float[] fvgMaxMitigationPct=array.new_float()
+var float[] ifvgMaxMitigationPct=array.new_float()
+var int[] ifvgBornBars=array.new_int()
+var int[] fvgBornBars=array.new_int()
+var int[] fvgLeftTimes=array.new_int()
+var box[] fvgBoxes=array.new_box()
+var label[] fvgLabels=array.new_label()
+
+f_addFVG(float top,float bot,int dir,int leftTime) =>
+    if array.size(fvgTops)>=maxFVGZones
+        box.delete(array.shift(fvgBoxes))
+        label oldFVGLabel=array.shift(fvgLabels)
+        if not na(oldFVGLabel)
+            label.delete(oldFVGLabel)
+        array.shift(fvgTops)
+        array.shift(fvgBots)
+        array.shift(fvgDirs)
+        array.shift(fvgStates)
+        array.shift(fvgMitigated)
+        array.shift(ifvgMitigated)
+        array.shift(fvgMaxMitigationPct)
+        array.shift(ifvgMaxMitigationPct)
+        array.shift(ifvgBornBars)
+        array.shift(fvgBornBars)
+        array.shift(fvgLeftTimes)
+    array.push(fvgTops,top)
+    array.push(fvgBots,bot)
+    array.push(fvgDirs,dir)
+    array.push(fvgStates,0)
+    array.push(fvgMitigated,false)
+    array.push(ifvgMitigated,false)
+    array.push(fvgMaxMitigationPct,0.0)
+    array.push(ifvgMaxMitigationPct,0.0)
+    array.push(ifvgBornBars,na)
+    array.push(fvgBornBars,bar_index)
+    array.push(fvgLeftTimes,leftTime)
+    box b=box.new(leftTime,top,time,bot,xloc=xloc.bar_time)
+    label lb=na
+    array.push(fvgBoxes,b)
+    array.push(fvgLabels,lb)
+
+if bullFVG
+    f_addFVG(low,high[2],1,time[2])
+if bearFVG
+    f_addFVG(low[2],high,-1,time[2])
+
+bool ifvgBullEvent=false
+bool ifvgBearEvent=false
+
+if array.size(fvgTops)>0
+    for n=array.size(fvgTops)-1 to 0
+        float top=array.get(fvgTops,n)
+        float bot=array.get(fvgBots,n)
+        int dir=array.get(fvgDirs,n)
+        int state=array.get(fvgStates,n)
+        int born=array.get(fvgBornBars,n)
+        int ifvgBorn=array.get(ifvgBornBars,n)
+        int leftTime=array.get(fvgLeftTimes,n)
+
+        // State 0 = active FVG (fresh or mitigated)
+        if barstate.isconfirmed and bar_index>born and state==0
+            float height=math.max(top-bot,syminfo.mintick)
+
+            // Mitigation begins the moment any later candle overlaps the gap.
+            // A wick is enough. Depth is measured separately for information.
+            bool touchesGap=high>=bot and low<=top
+            float fvgPenetration=dir==1?top-low:high-bot
+            float fvgFillPct=touchesGap?math.max(0.0,math.min(100.0,fvgPenetration/height*100.0)):0.0
+
+            if touchesGap
+                array.set(fvgMitigated,n,true)
+                float prevPct=array.get(fvgMaxMitigationPct,n)
+                array.set(fvgMaxMitigationPct,n,math.max(prevPct,fvgFillPct))
+
+            // FVG -> IFVG:
+            // Wick-through alone never flips the gap.
+            // A later candle must close beyond the far boundary.
+            bool closeBeyond=dir==1?close<bot:close>top
+            bool failureDirection=dir==1?close<open:close>open
+            float bodyHigh=math.max(open,close)
+            float bodyLow=math.min(open,close)
+            bool fullBodyBeyond=dir==1?bodyHigh<bot:bodyLow>top
+
+            // A wick beyond the far boundary never creates an IFVG.
+            // Default mode requires the candle CLOSE beyond the boundary
+            // and the candle body to close in the failure direction.
+            bool qualifiedFlip=ifvgFlipMode=="Full body beyond boundary"?fullBodyBeyond:(closeBeyond and failureDirection)
+
+            bool fullWickTraversal=dir==1?low<=bot:high>=top
+
+            if qualifiedFlip
+                array.set(fvgStates,n,2)
+                array.set(ifvgBornBars,n,bar_index)
+                array.set(ifvgMitigated,n,false)
+                array.set(ifvgMaxMitigationPct,n,0.0)
+                if dir==1
+                    ifvgBearEvent:=true
+                else
+                    ifvgBullEvent:=true
+            else if retireFVGOnFullWickFill and fullWickTraversal
+                // Fully consumed as an FVG, but NOT inverted because the
+                // required close/body-close confirmation did not occur.
+                array.set(fvgStates,n,3)
+
+        // State 2 = active IFVG.
+        else if barstate.isconfirmed and state==2
+            int invBorn=array.get(ifvgBornBars,n)
+
+            // The inversion candle itself is not an IFVG mitigation/retest.
+            if not na(invBorn) and bar_index>invBorn
+                float height=math.max(top-bot,syminfo.mintick)
+                bool touchesIFVG=high>=bot and low<=top
+
+                // Original bullish FVG -> bearish IFVG: retest from below.
+                // Original bearish FVG -> bullish IFVG: retest from above.
+                float ifvgPenetration=dir==1?high-bot:top-low
+                float ifvgFillPct=touchesIFVG?math.max(0.0,math.min(100.0,ifvgPenetration/height*100.0)):0.0
+
+                if touchesIFVG
+                    array.set(ifvgMitigated,n,true)
+                    float prevPct=array.get(ifvgMaxMitigationPct,n)
+                    array.set(ifvgMaxMitigationPct,n,math.max(prevPct,ifvgFillPct))
+
+                // IFVG may be consumed by a complete wick traversal.
+                // Close-based failure remains valid too.
+                bool closeInvalidated=dir==1?close>top:close<bot
+                bool wickConsumed=dir==1?high>=top:low<=bot
+                if closeInvalidated or (retireIFVGOnFullWickFill and wickConsumed)
+                    array.set(fvgStates,n,3)
+
+        state:=array.get(fvgStates,n)
+        bool fvgMit=array.get(fvgMitigated,n)
+        bool ifvgMit=array.get(ifvgMitigated,n)
+        float fvgPct=array.get(fvgMaxMitigationPct,n)
+        float ifvgPct=array.get(ifvgMaxMitigationPct,n)
+
+        bool isIFVG=state==2
+        bool directionalBull=isIFVG?dir==-1:dir==1
+        color c=isIFVG?(directionalBull?bullIFVGColor:bearIFVGColor):(dir==1?bullFVGColor:bearFVGColor)
+
+        bool explicitShow=state==0?showFVGZones:state==2?showIFVGZones:false
+        bool modeShow=modeAnalysis or modeFull
+        bool visible=state!=3 and explicitShow and modeShow
+
+        box b=array.get(fvgBoxes,n)
+        label lb=array.get(fvgLabels,n)
+
+        if state!=3
+            box.set_right(b,time)
+
+        box.set_bgcolor(b,visible?color.new(c,fvgTransparency):f_hidden(c))
+        box.set_border_color(b,visible?c:f_hidden(c))
+
+        string zoneText=""
+        if state==0
+            zoneText=fvgMit and showMitigationState?"FVG · MIT "+str.tostring(fvgPct,"#.0")+"%":"FVG"
+        else if state==2
+            zoneText=ifvgMit and showMitigationState?"IFVG · MIT "+str.tostring(ifvgPct,"#.0")+"%":"IFVG"
+
+        // Zone labels are refreshed only on the current chart bar.
+        // This keeps them among the newest label objects and prevents
+        // TradingView's global label GC from silently removing them.
+        if barstate.islast
+            if not na(lb)
+                label.delete(lb)
+                lb:=na
+            if visible and showFVGText
+                int rightTime=state==3?box.get_right(b):time
+                int zoneLabelTime=leftTime+(rightTime-leftTime)*3/4
+                lb:=label.new(zoneLabelTime,(top+bot)/2,zoneText,xloc=xloc.bar_time,style=label.style_none,textcolor=c,size=f_textSize())
+            array.set(fvgLabels,n,lb)
+
+//=============================================================================
+// P03 OB / BREAKER — SHARED STRUCTURE TRIGGER
+//=============================================================================
+bool obBullStruct=obStructureSource=="Internal"?iBullBreak:obStructureSource=="External"?xBullBreak:(iBullBreak or xBullBreak)
+bool obBearStruct=obStructureSource=="Internal"?iBearBreak:obStructureSource=="External"?xBearBreak:(iBearBreak or xBearBreak)
+bool obBullTrigger=barstate.isconfirmed and obBullStruct and disp>=obDispATR and (not requireFVGForOB or bullFVG)
+bool obBearTrigger=barstate.isconfirmed and obBearStruct and disp>=obDispATR and (not requireFVGForOB or bearFVG)
+
+f_findBullCandidate() =>
+    int found=-1
+    for n=1 to obSearchBack
+        if close[n]<open[n]
+            found:=n
+            break
+    found
+
+f_findBearCandidate() =>
+    int found=-1
+    for n=1 to obSearchBack
+        if close[n]>open[n]
+            found:=n
+            break
+    found
+
+int bullCand=obBullTrigger?f_findBullCandidate():-1
+int bearCand=obBearTrigger?f_findBearCandidate():-1
+
+var float[] obTops=array.new_float()
+var float[] obBots=array.new_float()
+var int[] obDirs=array.new_int()
+var int[] obStates=array.new_int() // 0 active OB,1 mitigated/weakened OB,2 breaker,3 invalidated/expired
+var bool[] obBreakerSweepSeen=array.new_bool()
+var bool[] obMitigated=array.new_bool()
+var bool[] obWeakened=array.new_bool()
+var bool[] bbMitigated=array.new_bool()
+var float[] obMitigationDepth=array.new_float()
+var float[] bbMitigationDepth=array.new_float()
+var int[] obTerminalBars=array.new_int()
+var int[] obBornBars=array.new_int()
+var int[] obLeftTimes=array.new_int()
+var box[] obBoxes=array.new_box()
+var label[] obLabels=array.new_label()
+
+f_addOB(float top,float bot,int dir,int cand) =>
+    if array.size(obTops)>=maxOBZones
+        box.delete(array.shift(obBoxes))
+        label oldOBLabel=array.shift(obLabels)
+        if not na(oldOBLabel)
+            label.delete(oldOBLabel)
+        array.shift(obTops)
+        array.shift(obBots)
+        array.shift(obDirs)
+        array.shift(obStates)
+        array.shift(obBreakerSweepSeen)
+        array.shift(obMitigated)
+        array.shift(obWeakened)
+        array.shift(bbMitigated)
+        array.shift(obMitigationDepth)
+        array.shift(bbMitigationDepth)
+        array.shift(obTerminalBars)
+        array.shift(obBornBars)
+        array.shift(obLeftTimes)
+    int leftTime=time[cand]
+    array.push(obTops,top)
+    array.push(obBots,bot)
+    array.push(obDirs,dir)
+    array.push(obStates,0)
+    array.push(obBreakerSweepSeen,false)
+    array.push(obMitigated,false)
+    array.push(obWeakened,false)
+    array.push(bbMitigated,false)
+    array.push(obMitigationDepth,0.0)
+    array.push(bbMitigationDepth,0.0)
+    array.push(obTerminalBars,na)
+    array.push(obBornBars,bar_index)
+    array.push(obLeftTimes,leftTime)
+    box b=box.new(leftTime,top,time,bot,xloc=xloc.bar_time)
+    label lb=na
+    array.push(obBoxes,b)
+    array.push(obLabels,lb)
+
+if obBullTrigger and bullCand>0
+    float top=obBodyOnly?math.max(open[bullCand],close[bullCand]):high[bullCand]
+    float bot=obBodyOnly?math.min(open[bullCand],close[bullCand]):low[bullCand]
+    f_addOB(top,bot,1,bullCand)
+
+if obBearTrigger and bearCand>0
+    float top=obBodyOnly?math.max(open[bearCand],close[bearCand]):high[bearCand]
+    float bot=obBodyOnly?math.min(open[bearCand],close[bearCand]):low[bearCand]
+    f_addOB(top,bot,-1,bearCand)
+
+bool bullBreakerEvent=false
+bool bearBreakerEvent=false
+
+if array.size(obTops)>0
+    for n=array.size(obTops)-1 to 0
+        float top=array.get(obTops,n)
+        float bot=array.get(obBots,n)
+        int dir=array.get(obDirs,n)
+        int state=array.get(obStates,n)
+        int born=array.get(obBornBars,n)
+        int leftTime=array.get(obLeftTimes,n)
+
+        float zoneHeight=math.max(top-bot,syminfo.mintick)
+        float bodyTop=math.max(open,close)
+        float bodyBot=math.min(open,close)
+        float mid=bot+zoneHeight*(obMitigationPct/100.0)
+
+        if barstate.isconfirmed and bar_index>born and state<=1
+            // Any later wick/body touching the block marks mitigation.
+            bool touchesZone=high>=bot and low<=top
+            float penetration=dir==1?top-low:high-bot
+            float depthPct=touchesZone?math.max(0.0,math.min(100.0,penetration/zoneHeight*100.0)):0.0
+
+            if touchesZone
+                array.set(obMitigated,n,true)
+                float prevDepth=array.get(obMitigationDepth,n)
+                array.set(obMitigationDepth,n,math.max(prevDepth,depthPct))
+
+            // Institutional "mean threshold": a candle BODY close past the configured
+            // midpoint weakens the block, but does not yet make it a breaker.
+            bool closePastMean=dir==1?close<mid:close>mid
+            if touchesZone and closePastMean
+                array.set(obWeakened,n,true)
+                array.set(obStates,n,1)
+
+            // Track relevant liquidity sweep after OB creation.
+            bool relevantSweep=dir==1?bearSweep:bullSweep
+            if relevantSweep and bar_index<=born+breakerMaxAge
+                array.set(obBreakerSweepSeen,n,true)
+
+            bool sweepSeen=array.get(obBreakerSweepSeen,n)
+
+            // Breaker failure requires the whole candle body beyond the OB zone,
+            // plus aggressive displacement, and optionally the prior sweep.
+            bool fullBodyBeyond=dir==1?bodyTop<bot:bodyBot>top
+            bool aggressiveFailure=disp>=breakerDispATR
+            bool breakerQualified=fullBodyBeyond and aggressiveFailure and (not breakerRequireLiquiditySweep or sweepSeen) and bar_index<=born+breakerMaxAge
+
+            bool obFullWickTraversal=dir==1?low<=bot:high>=top
+
+            if breakerQualified
+                array.set(obStates,n,2)
+                array.set(bbMitigated,n,false)
+                array.set(bbMitigationDepth,n,0.0)
+                if dir==1
+                    bearBreakerEvent:=true
+                else
+                    bullBreakerEvent:=true
+            else if retireOBOnFullWickFill and obFullWickTraversal
+                // Zone is fully consumed, but it does not become a Breaker
+                // unless the stricter breaker sequence is satisfied.
+                array.set(obStates,n,3)
+                array.set(obTerminalBars,n,bar_index)
+
+            // Active OB that never resolves is eventually archived visually.
+            if bar_index>born+obVisualMaxAge and array.get(obStates,n)<=1
+                array.set(obStates,n,3)
+                array.set(obTerminalBars,n,bar_index)
+
+        else if barstate.isconfirmed and state==2
+            // Breaker mitigation: any later re-entry into BB marks mitigation.
+            bool touchesBB=high>=bot and low<=top
+            float bbPen=dir==1?high-bot:top-low
+            float bbDepth=touchesBB?math.max(0.0,math.min(100.0,bbPen/zoneHeight*100.0)):0.0
+            if touchesBB
+                array.set(bbMitigated,n,true)
+                float prevBB=array.get(bbMitigationDepth,n)
+                array.set(bbMitigationDepth,n,math.max(prevBB,bbDepth))
+
+            // Breaker can be consumed by a full wick traversal through
+            // the opposite side, even if price later closes back.
+            bool breakerCloseInvalidated=dir==1?close>top:close<bot
+            bool breakerWickConsumed=dir==1?high>=top:low<=bot
+            if breakerCloseInvalidated or (retireBBOnFullWickFill and breakerWickConsumed) or bar_index>born+obVisualMaxAge
+                array.set(obStates,n,3)
+                array.set(obTerminalBars,n,bar_index)
+
+        state:=array.get(obStates,n)
+        bool breaker=state==2
+        bool directionalBull=breaker?dir==-1:dir==1
+        color c=breaker?(directionalBull?bullBreakerColor:bearBreakerColor):(dir==1?bullOBColor:bearOBColor)
+
+        bool explicitShow=breaker?showBreakerZones:showOBZones
+        bool modeShow=modeAnalysis or modeFull
+        bool visible=state!=3 and explicitShow and modeShow
+
+        box b=array.get(obBoxes,n)
+        label lb=array.get(obLabels,n)
+
+        // Stop extending when terminal.
+        if state!=3
+            box.set_right(b,time)
+
+        box.set_bgcolor(b,visible?color.new(c,obTransparency):f_hidden(c))
+        box.set_border_color(b,visible?c:f_hidden(c))
+
+        bool obMit=array.get(obMitigated,n)
+        bool weak=array.get(obWeakened,n)
+        bool bbMit=array.get(bbMitigated,n)
+        float obDepth=array.get(obMitigationDepth,n)
+        float bbDepth=array.get(bbMitigationDepth,n)
+
+        string blockText=""
+        if breaker
+            blockText=showOBMitigationState and bbMit?"BB · MIT "+str.tostring(bbDepth,"#.0")+"%":"BB"
+        else
+            blockText=showOBMitigationState and weak?"OB · WEAK "+str.tostring(obDepth,"#.0")+"%":
+                 showOBMitigationState and obMit?"OB · MIT "+str.tostring(obDepth,"#.0")+"%":"OB"
+
+        if barstate.islast
+            if not na(lb)
+                label.delete(lb)
+                lb:=na
+            if visible and showOBText
+                int rightTime=state==3?box.get_right(b):time
+                int blockLabelTime=leftTime+(rightTime-leftTime)*3/4
+                lb:=label.new(blockLabelTime,(top+bot)/2,blockText,xloc=xloc.bar_time,style=label.style_none,textcolor=c,size=f_textSize())
+            array.set(obLabels,n,lb)
+
+//=============================================================================
+// DIVERGENCE CONTEXT ENGINE
+// Momentum divergence only: RSI + MACD histogram.
+// Context/filter layer only; it does not create REV / CONT / INV setup states.
+//=============================================================================
+float rsiVal=ta.rsi(close,14)
+[macdLine,macdSignal,macdHist]=ta.macd(close,12,26,9)
+
+float pricePH=ta.pivothigh(high,divergencePivotLen,divergencePivotLen)
+float pricePL=ta.pivotlow(low,divergencePivotLen,divergencePivotLen)
+float rsiPH=ta.pivothigh(rsiVal,divergencePivotLen,divergencePivotLen)
+float rsiPL=ta.pivotlow(rsiVal,divergencePivotLen,divergencePivotLen)
+float macdPH=ta.pivothigh(macdHist,divergencePivotLen,divergencePivotLen)
+float macdPL=ta.pivotlow(macdHist,divergencePivotLen,divergencePivotLen)
+
+var float prevPricePH=na
+var float prevPricePL=na
+var float prevRSIPH=na
+var float prevRSIPL=na
+var float prevMACDPH=na
+var float prevMACDPL=na
+var int prevHighPivotBar=na
+var int prevLowPivotBar=na
+
+bool bullRSIDiv=false
+bool bearRSIDiv=false
+bool bullMACDDiv=false
+bool bearMACDDiv=false
+
+int pivotBar=bar_index-divergencePivotLen
+
+if not na(pricePH)
+    bool within=not na(prevHighPivotBar) and pivotBar-prevHighPivotBar<=divergenceMaxBars
+    if enableDivergenceContext and enableRSIDivergence and within and not na(prevPricePH) and not na(prevRSIPH) and not na(rsiPH)
+        bearRSIDiv:=pricePH>prevPricePH and rsiPH<prevRSIPH
+    if enableDivergenceContext and enableMACDDivergence and within and not na(prevPricePH) and not na(prevMACDPH) and not na(macdPH)
+        bearMACDDiv:=pricePH>prevPricePH and macdPH<prevMACDPH
+
+    prevPricePH:=pricePH
+    prevRSIPH:=rsiPH
+    prevMACDPH:=macdPH
+    prevHighPivotBar:=pivotBar
+
+if not na(pricePL)
+    bool within=not na(prevLowPivotBar) and pivotBar-prevLowPivotBar<=divergenceMaxBars
+    if enableDivergenceContext and enableRSIDivergence and within and not na(prevPricePL) and not na(prevRSIPL) and not na(rsiPL)
+        bullRSIDiv:=pricePL<prevPricePL and rsiPL>prevRSIPL
+    if enableDivergenceContext and enableMACDDivergence and within and not na(prevPricePL) and not na(prevMACDPL) and not na(macdPL)
+        bullMACDDiv:=pricePL<prevPricePL and macdPL>prevMACDPL
+
+    prevPricePL:=pricePL
+    prevRSIPL:=rsiPL
+    prevMACDPL:=macdPL
+    prevLowPivotBar:=pivotBar
+
+bool bullMomentumDiv=bullRSIDiv or bullMACDDiv
+bool bearMomentumDiv=bearRSIDiv or bearMACDDiv
+
+var int lastBullDivBar=na
+var int lastBearDivBar=na
+if bullMomentumDiv
+    lastBullDivBar:=pivotBar
+if bearMomentumDiv
+    lastBearDivBar:=pivotBar
+
+int divergenceContextWindow=20
+bool recentBullDiv=enableDivergenceContext and not na(lastBullDivBar) and bar_index-lastBullDivBar<=divergenceContextWindow
+bool recentBearDiv=enableDivergenceContext and not na(lastBearDivBar) and bar_index-lastBearDivBar<=divergenceContextWindow
+
+f_divAllows(int side) =>
+    if not enableDivergenceContext or divergenceFilterMode=="Off"
+        true
+    else
+        side==1?recentBullDiv:recentBearDiv
+
+f_divText(int side) =>
+    side==1?(recentBullDiv?"Bull supportive":"None"):(recentBearDiv?"Bear supportive":"None")
+
+var label[] divergenceLabels=array.new_label()
+if showDivergenceMarkers
+    if bullRSIDiv or bullMACDDiv
+        string t=(bullRSIDiv and bullMACDDiv)?"RSI+MACD Bull Div":bullRSIDiv?"RSI Bull Div":"MACD Bull Div"
+        label lb=label.new(pivotBar,low[divergencePivotLen],t,style=label.style_none,textcolor=bullDivColor,size=size.tiny)
+        array.push(divergenceLabels,lb)
+    if bearRSIDiv or bearMACDDiv
+        string t=(bearRSIDiv and bearMACDDiv)?"RSI+MACD Bear Div":bearRSIDiv?"RSI Bear Div":"MACD Bear Div"
+        label lb=label.new(pivotBar,high[divergencePivotLen],t,style=label.style_none,textcolor=bearDivColor,size=size.tiny)
+        array.push(divergenceLabels,lb)
+    while array.size(divergenceLabels)>40
+        label.delete(array.shift(divergenceLabels))
+
+//=============================================================================
+// VWAP CONTEXT ENGINE
+//=============================================================================
+bool anySessionActive=asiaIn or londonIn or nyIn
+bool newTrackedSession=anySessionActive and not anySessionActive[1]
+
+var float sessionPV=na
+var float sessionVol=na
+if newTrackedSession
+    sessionPV:=hlc3*volume
+    sessionVol:=volume
+else if anySessionActive
+    sessionPV:=nz(sessionPV)+hlc3*volume
+    sessionVol:=nz(sessionVol)+volume
+else
+    sessionPV:=na
+    sessionVol:=na
+
+float sessionVWAP=anySessionActive and nz(sessionVol)>0?sessionPV/sessionVol:na
+
+var line[] currentSessionVWAPSegments=array.new_line()
+var int currentSessionStartBar=na
+
+if newTrackedSession
+    // Remove all prior session VWAP segments; only the latest/current session is retained.
+    while array.size(currentSessionVWAPSegments)>0
+        line.delete(array.pop(currentSessionVWAPSegments))
+    currentSessionStartBar:=bar_index
+
+if enableVWAPContext and showSessionVWAP and anySessionActive and not na(sessionVWAP)
+    if bar_index>nz(currentSessionStartBar,bar_index)
+        line seg=line.new(bar_index-1,sessionVWAP[1],bar_index,sessionVWAP,xloc=xloc.bar_index,extend=extend.none,color=sessionVWAPColor,width=2)
+        array.push(currentSessionVWAPSegments,seg)
+
+bool newDay=ta.change(time("D"))!=0
+bool newWeek=ta.change(time("W"))!=0
+bool newMonth=ta.change(time("M"))!=0
+
+var float dayPV=na
+var float dayVol=na
+var float weekPV=na
+var float weekVol=na
+var float monthPV=na
+var float monthVol=na
+
+if newDay or na(dayPV)
+    dayPV:=hlc3*volume
+    dayVol:=volume
+else
+    dayPV+=hlc3*volume
+    dayVol+=volume
+
+if newWeek or na(weekPV)
+    weekPV:=hlc3*volume
+    weekVol:=volume
+else
+    weekPV+=hlc3*volume
+    weekVol+=volume
+
+if newMonth or na(monthPV)
+    monthPV:=hlc3*volume
+    monthVol:=volume
+else
+    monthPV+=hlc3*volume
+    monthVol+=volume
+
+float dailyVWAP=nz(dayVol)>0?dayPV/dayVol:na
+float weeklyVWAP=nz(weekVol)>0?weekPV/weekVol:na
+float monthlyVWAP=nz(monthVol)>0?monthPV/monthVol:na
+
+int barDayId=year(time)*10000+month(time)*100+dayofmonth(time)
+int lastDayId=year(last_bar_time)*10000+month(last_bar_time)*100+dayofmonth(last_bar_time)
+
+int barWeekId=year(time)*100+weekofyear(time)
+int lastWeekId=year(last_bar_time)*100+weekofyear(last_bar_time)
+
+int barMonthId=year(time)*100+month(time)
+int lastMonthId=year(last_bar_time)*100+month(last_bar_time)
+
+bool showCurrentDayOnly=barDayId==lastDayId
+bool showCurrentWeekOnly=barWeekId==lastWeekId
+bool showCurrentMonthOnly=barMonthId==lastMonthId
+
+// Only display the current active session / current calendar period.
+// plot.style_linebr prevents connections across na boundaries.
+plot(na,"Session VWAP",color=sessionVWAPColor,linewidth=2,style=plot.style_linebr)
+plot(enableVWAPContext and showDailyVWAP and showCurrentDayOnly?dailyVWAP:na,"Daily VWAP",color=dailyVWAPColor,linewidth=2,style=plot.style_linebr)
+plot(enableVWAPContext and showWeeklyVWAP and showCurrentWeekOnly?weeklyVWAP:na,"Weekly VWAP",color=weeklyVWAPColor,linewidth=1,style=plot.style_linebr)
+plot(enableVWAPContext and showMonthlyVWAP and showCurrentMonthOnly?monthlyVWAP:na,"Monthly VWAP",color=monthlyVWAPColor,linewidth=1,style=plot.style_linebr)
+
+f_vwapAllows(int side) =>
+    if not enableVWAPContext or vwapFilterMode=="Off"
+        true
+    else
+        bool dailyOK=side==1?close>=dailyVWAP:close<=dailyVWAP
+        bool sessionOK=na(sessionVWAP)?true:(side==1?close>=sessionVWAP:close<=sessionVWAP)
+        vwapFilterMode=="Daily align"?dailyOK:(dailyOK and sessionOK)
+
+f_vwapPos(float v) =>
+    na(v)?"N/A":close>v?"Above":close<v?"Below":"At"
+
+//=============================================================================
+// P05 ACTIVE P/D OBJECT — REPLACE OR INVALIDATE
+//=============================================================================
+var float pdZoneHigh=na
+var float pdZoneLow=na
+var int pdZoneLeftTime=na
+var int pdZoneDirection=0
+var string pdZoneSource="NONE"
+var int pdZoneVersion=0
+var bool pdZoneActive=false
+
+var box pdBox=na
+var line pdFib1=na
+var line pdFib2=na
+var line pdFib3=na
+var line pdFib4=na
+var line pdFib5=na
+var label pdPremium=na
+var label pdEq=na
+var label pdDiscount=na
+var label pdFibLabel1=na
+var label pdFibLabel2=na
+var label pdFibLabel3=na
+var label pdFibLabel4=na
+var label pdFibLabel5=na
+
+f_pdPrice(float level) =>
+    float span=pdZoneHigh-pdZoneLow
+    fibMapping=="Directional"?(pdZoneDirection==1?pdZoneLow+span*level:pdZoneHigh-span*level):pdZoneLow+span*level
+
+bool pdInvalidated=pdZoneActive and barstate.isconfirmed and (
+     (pdZoneDirection==1 and (close<pdZoneLow or (invalidatePDOnOppositeBreak and xBearBreak))) or
+     (pdZoneDirection==-1 and (close>pdZoneHigh or (invalidatePDOnOppositeBreak and xBullBreak)))
+ )
+
+if pdInvalidated or newPDZone
+    if not na(pdBox)
+        box.delete(pdBox)
+        pdBox:=na
+    if not na(pdFib1)
+        line.delete(pdFib1)
+        line.delete(pdFib2)
+        line.delete(pdFib3)
+        line.delete(pdFib4)
+        line.delete(pdFib5)
+        pdFib1:=na
+        pdFib2:=na
+        pdFib3:=na
+        pdFib4:=na
+        pdFib5:=na
+    if not na(pdPremium)
+        label.delete(pdPremium)
+        label.delete(pdEq)
+        label.delete(pdDiscount)
+        label.delete(pdFibLabel1)
+        label.delete(pdFibLabel2)
+        label.delete(pdFibLabel3)
+        label.delete(pdFibLabel4)
+        label.delete(pdFibLabel5)
+        pdPremium:=na
+        pdEq:=na
+        pdDiscount:=na
+        pdFibLabel1:=na
+        pdFibLabel2:=na
+        pdFibLabel3:=na
+        pdFibLabel4:=na
+        pdFibLabel5:=na
+    pdZoneActive:=false
+
+if newPDZone
+    pdZoneHigh:=newPDHigh
+    pdZoneLow:=newPDLow
+    pdZoneLeftTime:=math.min(newPDHighTime,newPDLowTime)
+    pdZoneDirection:=newPDDirection
+    pdZoneSource:=newPDSource
+    pdZoneVersion+=1
+    pdZoneActive:=true
+
+    float p1=f_pdPrice(fib1)
+    float p2=f_pdPrice(fib2)
+    float p3=f_pdPrice(fib3)
+    float p4=f_pdPrice(fib4)
+    float p5=f_pdPrice(fib5)
+
+    pdBox:=box.new(pdZoneLeftTime,pdZoneHigh,time,pdZoneLow,xloc=xloc.bar_time)
+    pdFib1:=line.new(pdZoneLeftTime,p1,time,p1,xloc=xloc.bar_time,extend=extend.none)
+    pdFib2:=line.new(pdZoneLeftTime,p2,time,p2,xloc=xloc.bar_time,extend=extend.none)
+    pdFib3:=line.new(pdZoneLeftTime,p3,time,p3,xloc=xloc.bar_time,extend=extend.none,style=line.style_dashed)
+    pdFib4:=line.new(pdZoneLeftTime,p4,time,p4,xloc=xloc.bar_time,extend=extend.none)
+    pdFib5:=line.new(pdZoneLeftTime,p5,time,p5,xloc=xloc.bar_time,extend=extend.none)
+    pdPremium:=label.new(time,pdZoneLow+(pdZoneHigh-pdZoneLow)*0.78,"",xloc=xloc.bar_time,style=label.style_none,size=f_textSize())
+    pdEq:=label.new(time,pdZoneLow+(pdZoneHigh-pdZoneLow)*0.50,"",xloc=xloc.bar_time,style=label.style_none,size=f_textSize())
+    pdDiscount:=label.new(time,pdZoneLow+(pdZoneHigh-pdZoneLow)*0.22,"",xloc=xloc.bar_time,style=label.style_none,size=f_textSize())
+    pdFibLabel1:=label.new(time,p1,"",xloc=xloc.bar_time,style=label.style_none,size=f_textSize())
+    pdFibLabel2:=label.new(time,p2,"",xloc=xloc.bar_time,style=label.style_none,size=f_textSize())
+    pdFibLabel3:=label.new(time,p3,"",xloc=xloc.bar_time,style=label.style_none,size=f_textSize())
+    pdFibLabel4:=label.new(time,p4,"",xloc=xloc.bar_time,style=label.style_none,size=f_textSize())
+    pdFibLabel5:=label.new(time,p5,"",xloc=xloc.bar_time,style=label.style_none,size=f_textSize())
+
+if pdZoneActive
+    bool vis=showPDZone and (modeAnalysis or modeFull)
+    float p1=f_pdPrice(fib1)
+    float p2=f_pdPrice(fib2)
+    float p3=f_pdPrice(fib3)
+    float p4=f_pdPrice(fib4)
+    float p5=f_pdPrice(fib5)
+
+    box.set_right(pdBox,time)
+    box.set_bgcolor(pdBox,vis?color.new(pdZoneColor,pdTransparency):f_hidden(pdZoneColor))
+    box.set_border_color(pdBox,vis?pdZoneColor:f_hidden(pdZoneColor))
+
+    color fc=vis and showFibLevels?fibColor:f_hidden(fibColor)
+    line.set_xy2(pdFib1,time,p1)
+    line.set_xy2(pdFib2,time,p2)
+    line.set_xy2(pdFib3,time,p3)
+    line.set_xy2(pdFib4,time,p4)
+    line.set_xy2(pdFib5,time,p5)
+    line.set_color(pdFib1,fc)
+    line.set_color(pdFib2,fc)
+    line.set_color(pdFib3,fc)
+    line.set_color(pdFib4,fc)
+    line.set_color(pdFib5,fc)
+
+    label.set_xy(pdPremium,time,pdZoneLow+(pdZoneHigh-pdZoneLow)*0.78)
+    label.set_xy(pdEq,time,pdZoneLow+(pdZoneHigh-pdZoneLow)*0.50)
+    label.set_xy(pdDiscount,time,pdZoneLow+(pdZoneHigh-pdZoneLow)*0.22)
+    label.set_text(pdPremium,vis and showPDText?"PREMIUM":"")
+    label.set_text(pdEq,vis and showPDText?"EQ":"")
+    label.set_text(pdDiscount,vis and showPDText?"DISCOUNT":"")
+
+    label.set_xy(pdFibLabel1,time,p1)
+    label.set_xy(pdFibLabel2,time,p2)
+    label.set_xy(pdFibLabel3,time,p3)
+    label.set_xy(pdFibLabel4,time,p4)
+    label.set_xy(pdFibLabel5,time,p5)
+    label.set_text(pdFibLabel1,vis and showFibLabels?str.tostring(fib1,"#.###"):"")
+    label.set_text(pdFibLabel2,vis and showFibLabels?str.tostring(fib2,"#.###"):"")
+    label.set_text(pdFibLabel3,vis and showFibLabels?str.tostring(fib3,"#.###"):"")
+    label.set_text(pdFibLabel4,vis and showFibLabels?str.tostring(fib4,"#.###"):"")
+    label.set_text(pdFibLabel5,vis and showFibLabels?str.tostring(fib5,"#.###"):"")
+
+float pdMid=pdZoneActive?(pdZoneHigh+pdZoneLow)/2:na
+bool inDiscount=pdZoneActive and close<=pdMid
+bool inPremium=pdZoneActive and close>=pdMid
+
+//=============================================================================
+// HTF / MTF BIAS ENGINE
+//=============================================================================
+f_tfBias(int pLen) =>
+    float ph=ta.pivothigh(high,pLen,pLen)
+    float pl=ta.pivotlow(low,pLen,pLen)
+    var float lastPH=na
+    var float lastPL=na
+    var int bias=0
+    if not na(ph)
+        lastPH:=ph
+    if not na(pl)
+        lastPL:=pl
+    if barstate.isconfirmed
+        if not na(lastPH) and close>lastPH
+            bias:=1
+        else if not na(lastPL) and close<lastPL
+            bias:=-1
+    bias
+
+int htfBiasRaw=request.security(syminfo.tickerid,htfBiasTF,f_tfBias(biasPivotLen)[1],lookahead=barmerge.lookahead_on)
+int mtfBiasRaw=request.security(syminfo.tickerid,mtfBiasTF,f_tfBias(biasPivotLen)[1],lookahead=barmerge.lookahead_on)
+
+int htfBias=enableBiasEngine?htfBiasRaw:0
+int mtfBias=enableBiasEngine?mtfBiasRaw:0
+
+bool htfBull=htfBias==1
+bool htfBear=htfBias==-1
+bool mtfBull=mtfBias==1
+bool mtfBear=mtfBias==-1
+bool mtfAligned=(htfBull and mtfBull) or (htfBear and mtfBear)
+
+f_biasAllows(int side) =>
+    if not enableBiasEngine or biasFilterMode=="Off" or biasFilterMode=="Countertrend allowed"
+        true
+    else
+        bool htfOK=side==1?htfBull:htfBear
+        bool mtfOK=side==1?mtfBull:mtfBear
+        htfOK and (not requireMTFAlignment or mtfOK)
+
+f_biasText(int b) =>
+    b==1?"Bullish":b==-1?"Bearish":"Neutral"
+
+f_biasColor(int b) =>
+    b==1?color.lime:b==-1?color.red:color.gray
+
+bgcolor(showBiasBackground and enableBiasEngine?(htfBias==1?color.new(color.lime,92):htfBias==-1?color.new(color.red,92):na):na)
+
+//=============================================================================
+// SIGNAL SCORING CONTEXT
+// Descriptive/contextual only. Setup-state calculations remain unchanged.
+//=============================================================================
+f_scoreSignal(side, family, structureType, poiType) =>
+    int score=0
+    score += family=="REV"?30:family=="INV"?28:25
+    score += structureType=="MSS"?20:structureType=="CHoCH"?15:structureType=="BOS"?10:0
+    score += poiType=="IFVG"?15:poiType=="BB"?15:poiType=="OB"?12:poiType=="FVG"?10:0
+
+    bool htfOK=side==1?htfBull:htfBear
+    bool mtfOK=side==1?mtfBull:mtfBear
+    score += htfOK?10:0
+    score += mtfOK?5:0
+
+    bool dailyOK=side==1?close>=dailyVWAP:close<=dailyVWAP
+    bool sessionOK=not na(sessionVWAP) and (side==1?close>=sessionVWAP:close<=sessionVWAP)
+    score += dailyOK?5:0
+    score += sessionOK?3:0
+
+    bool divOK=side==1?recentBullDiv:recentBearDiv
+    score += divOK?7:0
+    math.min(score,100)
+
+f_scoreAllows(score) =>
+    not enableSignalScoring or scoreFilterMode=="Off" or score>=minimumSignalScore
+
+f_scoreGrade(score) =>
+    score>=85?"A":score>=70?"B":score>=55?"C":"D"
+
+var int lastSignalScore=na
+var string lastSignalFamily="NONE"
+var string lastSignalGrade="—"
+
+//=============================================================================
+// INVERSION SIGNAL ENGINE
+// States: 0 IDLE, 1 WAIT_STRUCTURE, 2 WAIT_RETEST, 3 TRIGGERED, 4 INVALIDATED, 5 EXPIRED
+//=============================================================================
+var int invState=0
+var int invSide=0
+var string invPOIType="NONE"
+var int invPOIBornBar=na
+var float invTop=na
+var float invBot=na
+var int invStartBar=na
+var int invStructBar=na
+var string invStructType="NONE"
+var int invTriggerCount=0
+var int invInvalidCount=0
+var int invExpireCount=0
+
+//=============================================================================
+// POI-FIRST CONTINUATION SIGNAL ENGINE
+// States: 0 IDLE, 1 WAIT_BOS, 2 WAIT_RETEST, 3 TRIGGERED, 4 INVALIDATED, 5 EXPIRED
+//=============================================================================
+var int contState=0
+var int contSide=0
+var string contPOIType="NONE"
+var int contPOIBornBar=na
+var float contTop=na
+var float contBot=na
+var int contStartBar=na
+var int contBOSBar=na
+var int contTriggerCount=0
+var int contInvalidCount=0
+var int contExpireCount=0
+
+//=============================================================================
+// POI-FIRST CONTINUATION ENGINE
+// FVG or validated OB -> same-direction BOS -> same POI retest/reclaim -> signal
+//=============================================================================
+bool contLongSignal=false
+bool contShortSignal=false
+int contSignalScore=na
+
+bool newBullContFVG=enableContinuationSignals and continuationUseFVG and bullFVG
+bool newBearContFVG=enableContinuationSignals and continuationUseFVG and bearFVG
+bool newBullContOB=enableContinuationSignals and continuationUseOB and obBullTrigger
+bool newBearContOB=enableContinuationSignals and continuationUseOB and obBearTrigger
+
+if contState==0
+    if newBullContFVG or newBullContOB
+        contState:=1
+        contSide:=1
+        contPOIType:=newBullContFVG?"FVG":"OB"
+        contStartBar:=bar_index
+        contBOSBar:=na
+
+        if newBullContFVG and array.size(fvgTops)>0
+            int n=array.size(fvgTops)-1
+            contTop:=array.get(fvgTops,n)
+            contBot:=array.get(fvgBots,n)
+            contPOIBornBar:=array.get(fvgBornBars,n)
+        else if newBullContOB and array.size(obTops)>0
+            int n=array.size(obTops)-1
+            contTop:=array.get(obTops,n)
+            contBot:=array.get(obBots,n)
+            contPOIBornBar:=array.get(obBornBars,n)
+
+    else if newBearContFVG or newBearContOB
+        contState:=1
+        contSide:=-1
+        contPOIType:=newBearContFVG?"FVG":"OB"
+        contStartBar:=bar_index
+        contBOSBar:=na
+
+        if newBearContFVG and array.size(fvgTops)>0
+            int n=array.size(fvgTops)-1
+            contTop:=array.get(fvgTops,n)
+            contBot:=array.get(fvgBots,n)
+            contPOIBornBar:=array.get(fvgBornBars,n)
+        else if newBearContOB and array.size(obTops)>0
+            int n=array.size(obTops)-1
+            contTop:=array.get(obTops,n)
+            contBot:=array.get(obBots,n)
+            contPOIBornBar:=array.get(obBornBars,n)
+
+if contState==1
+    bool bullBOS=(iBullBreak and not iBullCH and not iBullMSS) or (xBullBreak and not xBullCH and not xBullMSS)
+    bool bearBOS=(iBearBreak and not iBearCH and not iBearMSS) or (xBearBreak and not xBearCH and not xBearMSS)
+
+    if bar_index>contStartBar+continuationConfirmWindow
+        contState:=5
+        contExpireCount+=1
+    else if contSide==1 and bullBOS
+        contState:=2
+        contBOSBar:=bar_index
+    else if contSide==-1 and bearBOS
+        contState:=2
+        contBOSBar:=bar_index
+
+if contState==2 and not na(contBOSBar)
+    bool contPOIStillActive=false
+
+    if contPOIType=="FVG"
+        if array.size(fvgStates)>0
+            for n=array.size(fvgStates)-1 to 0
+                int st=array.get(fvgStates,n)
+                int born=array.get(fvgBornBars,n)
+                if born==contPOIBornBar and st==0
+                    contPOIStillActive:=true
+                    break
+
+    else if contPOIType=="OB"
+        if array.size(obStates)>0
+            for n=array.size(obStates)-1 to 0
+                int st=array.get(obStates,n)
+                int born=array.get(obBornBars,n)
+                if born==contPOIBornBar and st<=1
+                    contPOIStillActive:=true
+                    break
+
+    bool afterBOS=bar_index>contBOSBar
+    bool touches=afterBOS and low<=contTop and high>=contBot
+    float mid=(contTop+contBot)/2
+
+    bool bullBoundarySweep=afterBOS and low<=contBot and close>contBot
+    bool bearBoundarySweep=afterBOS and high>=contTop and close<contTop
+    bool bullMitigationReclaim=touches and close>mid
+    bool bearMitigationReclaim=touches and close<mid
+    bool bullDirectional=touches and close>open
+    bool bearDirectional=touches and close<open
+
+    bool bullReaction=continuationReaction=="Boundary sweep reclaim"?bullBoundarySweep:
+         continuationReaction=="Mitigation reclaim"?bullMitigationReclaim:
+         continuationReaction=="Touch only"?touches:
+         bullDirectional
+
+    bool bearReaction=continuationReaction=="Boundary sweep reclaim"?bearBoundarySweep:
+         continuationReaction=="Mitigation reclaim"?bearMitigationReclaim:
+         continuationReaction=="Touch only"?touches:
+         bearDirectional
+
+    bool sameBarReclaim=contSide==1?bullBoundarySweep:bearBoundarySweep
+    bool usableNow=contPOIStillActive or sameBarReclaim
+
+    if not usableNow
+        contState:=4
+        contInvalidCount+=1
+    else if bar_index>contBOSBar+continuationRetestWindow
+        contState:=5
+        contExpireCount+=1
+    else if afterBOS and barstate.isconfirmed
+        if contSide==1
+            contSignalScore:=f_scoreSignal(1,"CONT","BOS",contPOIType)
+            if bullReaction and f_biasAllows(1) and f_vwapAllows(1) and f_divAllows(1) and f_scoreAllows(contSignalScore)
+                contLongSignal:=true
+                lastSignalScore:=contSignalScore
+                lastSignalFamily:="CONT"
+                lastSignalGrade:=f_scoreGrade(contSignalScore)
+                contState:=3
+                contTriggerCount+=1
+        else if contSide==-1
+            contSignalScore:=f_scoreSignal(-1,"CONT","BOS",contPOIType)
+            if bearReaction and f_biasAllows(-1) and f_vwapAllows(-1) and f_divAllows(-1) and f_scoreAllows(contSignalScore)
+                contShortSignal:=true
+                lastSignalScore:=contSignalScore
+                lastSignalFamily:="CONT"
+                lastSignalGrade:=f_scoreGrade(contSignalScore)
+                contState:=3
+                contTriggerCount+=1
+
+//=============================================================================
+// INVERSION ENGINE
+// Confirmed IFVG or BB -> reversal structure confirmation -> same POI retest/reclaim
+//=============================================================================
+bool invLongSignal=false
+bool invShortSignal=false
+int invSignalScore=na
+
+bool newBullInvIFVG=enableInversionSignals and inversionUseIFVG and ifvgBullEvent
+bool newBearInvIFVG=enableInversionSignals and inversionUseIFVG and ifvgBearEvent
+bool newBullInvBB=enableInversionSignals and inversionUseBB and bullBreakerEvent
+bool newBearInvBB=enableInversionSignals and inversionUseBB and bearBreakerEvent
+
+if invState==0
+    if newBullInvIFVG or newBullInvBB
+        invState:=1
+        invSide:=1
+        invPOIType:=newBullInvIFVG?"IFVG":"BB"
+        invStartBar:=bar_index
+        invStructBar:=na
+        invStructType:="NONE"
+
+        if newBullInvIFVG and array.size(fvgTops)>0
+            int n=array.size(fvgTops)-1
+            invTop:=array.get(fvgTops,n)
+            invBot:=array.get(fvgBots,n)
+            invPOIBornBar:=array.get(fvgBornBars,n)
+        else if newBullInvBB and array.size(obTops)>0
+            int n=array.size(obTops)-1
+            invTop:=array.get(obTops,n)
+            invBot:=array.get(obBots,n)
+            invPOIBornBar:=array.get(obBornBars,n)
+
+    else if newBearInvIFVG or newBearInvBB
+        invState:=1
+        invSide:=-1
+        invPOIType:=newBearInvIFVG?"IFVG":"BB"
+        invStartBar:=bar_index
+        invStructBar:=na
+        invStructType:="NONE"
+
+        if newBearInvIFVG and array.size(fvgTops)>0
+            int n=array.size(fvgTops)-1
+            invTop:=array.get(fvgTops,n)
+            invBot:=array.get(fvgBots,n)
+            invPOIBornBar:=array.get(fvgBornBars,n)
+        else if newBearInvBB and array.size(obTops)>0
+            int n=array.size(obTops)-1
+            invTop:=array.get(obTops,n)
+            invBot:=array.get(obBots,n)
+            invPOIBornBar:=array.get(obBornBars,n)
+
+if invState==1
+    bool bullCore=(iBullCH or iBullMSS or xBullCH or xBullMSS)
+    bool bearCore=(iBearCH or iBearMSS or xBearCH or xBearMSS)
+    bool bullAny=(iBullBreak or xBullBreak)
+    bool bearAny=(iBearBreak or xBearBreak)
+    bool bullConfirm=inversionStructure=="Any structure break"?bullAny:bullCore
+    bool bearConfirm=inversionStructure=="Any structure break"?bearAny:bearCore
+
+    if bar_index>invStartBar+inversionConfirmWindow
+        invState:=5
+        invExpireCount+=1
+    else if invSide==1 and bullConfirm
+        invState:=2
+        invStructBar:=bar_index
+        invStructType:=(iBullMSS or xBullMSS)?"MSS":(iBullCH or xBullCH)?"CHoCH":"BOS"
+    else if invSide==-1 and bearConfirm
+        invState:=2
+        invStructBar:=bar_index
+        invStructType:=(iBearMSS or xBearMSS)?"MSS":(iBearCH or xBearCH)?"CHoCH":"BOS"
+
+if invState==2 and not na(invStructBar)
+    bool invPOIStillActive=false
+
+    if invPOIType=="IFVG"
+        if array.size(fvgStates)>0
+            for n=array.size(fvgStates)-1 to 0
+                int st=array.get(fvgStates,n)
+                int born=array.get(fvgBornBars,n)
+                if born==invPOIBornBar and st==2
+                    invPOIStillActive:=true
+                    break
+
+    else if invPOIType=="BB"
+        if array.size(obStates)>0
+            for n=array.size(obStates)-1 to 0
+                int st=array.get(obStates,n)
+                int born=array.get(obBornBars,n)
+                if born==invPOIBornBar and st==2
+                    invPOIStillActive:=true
+                    break
+
+    bool afterStruct=bar_index>invStructBar
+    bool touches=afterStruct and low<=invTop and high>=invBot
+    float mid=(invTop+invBot)/2
+
+    bool bullBoundarySweep=afterStruct and low<=invBot and close>invBot
+    bool bearBoundarySweep=afterStruct and high>=invTop and close<invTop
+    bool bullMitigationReclaim=touches and close>mid
+    bool bearMitigationReclaim=touches and close<mid
+    bool bullDirectional=touches and close>open
+    bool bearDirectional=touches and close<open
+
+    bool bullReaction=inversionReaction=="Boundary sweep reclaim"?bullBoundarySweep:
+         inversionReaction=="Mitigation reclaim"?bullMitigationReclaim:
+         inversionReaction=="Touch only"?touches:
+         bullDirectional
+
+    bool bearReaction=inversionReaction=="Boundary sweep reclaim"?bearBoundarySweep:
+         inversionReaction=="Mitigation reclaim"?bearMitigationReclaim:
+         inversionReaction=="Touch only"?touches:
+         bearDirectional
+
+    bool sameBarReclaim=invSide==1?bullBoundarySweep:bearBoundarySweep
+    bool usableNow=invPOIStillActive or sameBarReclaim
+
+    if not usableNow
+        invState:=4
+        invInvalidCount+=1
+    else if bar_index>invStructBar+inversionRetestWindow
+        invState:=5
+        invExpireCount+=1
+    else if afterStruct and barstate.isconfirmed
+        if invSide==1
+            invSignalScore:=f_scoreSignal(1,"INV",invStructType,invPOIType)
+            if bullReaction and f_biasAllows(1) and f_vwapAllows(1) and f_divAllows(1) and f_scoreAllows(invSignalScore)
+                invLongSignal:=true
+                lastSignalScore:=invSignalScore
+                lastSignalFamily:="INV"
+                lastSignalGrade:=f_scoreGrade(invSignalScore)
+                invState:=3
+                invTriggerCount+=1
+        else if invSide==-1
+            invSignalScore:=f_scoreSignal(-1,"INV",invStructType,invPOIType)
+            if bearReaction and f_biasAllows(-1) and f_vwapAllows(-1) and f_divAllows(-1) and f_scoreAllows(invSignalScore)
+                invShortSignal:=true
+                lastSignalScore:=invSignalScore
+                lastSignalFamily:="INV"
+                lastSignalGrade:=f_scoreGrade(invSignalScore)
+                invState:=3
+                invTriggerCount+=1
+
+//=============================================================================
+// PROVISIONAL SIGNAL ENGINE
+//
+// 0 IDLE
+// 1 WAIT_DISPLACEMENT
+// 2 WAIT_SHIFT
+// 3 WAIT_POI
+// 4 WAIT_RETEST
+// 5 TRIGGERED
+// 6 INVALIDATED
+// 7 EXPIRED
+//
+// Causal order:
+// liquidity sweep -> directional displacement -> CHoCH/MSS -> POI -> retest
+//=============================================================================
+var int sigState=0
+var int sigSide=0
+var int sigSweepBar=na
+var int sigDispBar=na
+var int sigShiftBar=na
+var int sigPOISelectBar=na
+var int sigPOIBornBar=na
+var float sigPOITop=na
+var float sigPOIBot=na
+var string sigPOIType="NONE"
+var string sigLiquiditySource="NONE"
+var string sigShiftType="NONE"
+var int lastTriggeredSweepBar=na
+var int lastTriggeredPOIBornBar=na
+var string lastTriggeredPOIType="NONE"
+var int sigStartCount=0
+var int sigDispCount=0
+var int sigShiftCount=0
+var int sigPOICount=0
+var int sigTriggerCount=0
+var int sigInvalidCount=0
+var int sigExpireCount=0
+var int sigPOIInvalidBeforeRetestCount=0
+var int sigPOITimeoutCount=0
+var int sigSweepReclaimCount=0
+
+bool longSignal=false
+bool shortSignal=false
+int revSignalScore=na
+bool sigSweepEventLong=false
+bool sigSweepEventShort=false
+bool sigDispEvent=false
+bool sigShiftEvent=false
+bool sigPOIEvent=false
+
+float effectiveSignalDispATR=signalSensitivity=="Diagnostic"?math.min(signalDispATR,0.30):signalSensitivity=="Balanced"?math.min(signalDispATR,0.50):signalDispATR
+bool bullDisplacement=barstate.isconfirmed and close>open and disp>=effectiveSignalDispATR
+bool bearDisplacement=barstate.isconfirmed and close<open and disp>=effectiveSignalDispATR
+
+bool bullInternalShift=iBullMSS or iBullCH
+bool bearInternalShift=iBearMSS or iBearCH
+bool bullExternalShift=xBullMSS or xBullCH
+bool bearExternalShift=xBearMSS or xBearCH
+
+bool bullShiftCore=requireInternalShift?bullInternalShift:(bullInternalShift or (allowExternalShift and bullExternalShift))
+bool bearShiftCore=requireInternalShift?bearInternalShift:(bearInternalShift or (allowExternalShift and bearExternalShift))
+bool bullAnyBreak=iBullBreak or xBullBreak
+bool bearAnyBreak=iBearBreak or xBearBreak
+bool bullShiftAllowed=signalSensitivity=="Diagnostic"?(bullShiftCore or bullAnyBreak):bullShiftCore
+bool bearShiftAllowed=signalSensitivity=="Diagnostic"?(bearShiftCore or bearAnyBreak):bearShiftCore
+
+bool oppositeBullBOS=iBullBOS or xBullBOS
+bool oppositeBearBOS=iBearBOS or xBearBOS
+
+// Reversal sweeps are the default setup origin.
+// Close-through liquidity resolutions are optional because they represent
+// continuation-style behavior and can otherwise create illogical reversals.
+bool longLiquidityEvent=bullSweep or (allowResolvedLiquidityOrigins and bullResolvedEvent)
+bool shortLiquidityEvent=bearSweep or (allowResolvedLiquidityOrigins and bearResolvedEvent)
+string longLiquiditySource=bullSweep?latestSweepSource:latestResolvedSource
+string shortLiquiditySource=bearSweep?latestSweepSource:latestResolvedSource
+
+if enableTestSignals
+    // Ambiguous same-bar two-sided sweep is not a clean directional setup.
+    if longLiquidityEvent and shortLiquidityEvent
+        sigState:=6
+        sigInvalidCount+=1
+        sigSide:=0
+        sigSweepBar:=na
+        sigDispBar:=na
+        sigShiftBar:=na
+        sigPOISelectBar:=na
+        sigPOIBornBar:=na
+        sigPOITop:=na
+        sigPOIBot:=na
+        sigPOIType:="NONE"
+        sigLiquiditySource:="NONE"
+        sigShiftType:="NONE"
+
+    else
+        // Start or refresh a directional candidate from liquidity.
+        if longLiquidityEvent
+            bool canStart=sigState==0 or sigState>=5 or sigSide==-1 or resetOnNewSameSideSweep
+            if canStart
+                sigState:=1
+                sigSide:=1
+                sigSweepBar:=bar_index
+                sigDispBar:=na
+                sigShiftBar:=na
+                sigPOISelectBar:=na
+                sigPOIBornBar:=na
+                sigPOITop:=na
+                sigPOIBot:=na
+                sigPOIType:="NONE"
+                sigLiquiditySource:=longLiquiditySource
+                sigShiftType:="NONE"
+                sigSweepEventLong:=true
+                sigStartCount+=1
+
+        if shortLiquidityEvent
+            bool canStart=sigState==0 or sigState>=5 or sigSide==1 or resetOnNewSameSideSweep
+            if canStart
+                sigState:=1
+                sigSide:=-1
+                sigSweepBar:=bar_index
+                sigDispBar:=na
+                sigShiftBar:=na
+                sigPOISelectBar:=na
+                sigPOIBornBar:=na
+                sigPOITop:=na
+                sigPOIBot:=na
+                sigPOIType:="NONE"
+                sigLiquiditySource:=shortLiquiditySource
+                sigShiftType:="NONE"
+                sigSweepEventShort:=true
+                sigStartCount+=1
+
+    // Opposite continuation structure invalidates a live candidate.
+    bool liveCandidate=sigState>=1 and sigState<=4
+    if liveCandidate and invalidateOnOppositeBOS
+        if sigSide==1 and oppositeBearBOS
+            sigState:=6
+            sigInvalidCount+=1
+        if sigSide==-1 and oppositeBullBOS
+            sigState:=6
+            sigInvalidCount+=1
+
+    // Stage 1: require directional displacement after sweep.
+    if sigState==1 and not na(sigSweepBar)
+        if bar_index>sigSweepBar+signalDispWindow
+            sigState:=7
+            sigExpireCount+=1
+        else if sigSide==1 and bullDisplacement
+            sigState:=2
+            sigDispBar:=bar_index
+            sigDispEvent:=true
+            sigDispCount+=1
+        else if sigSide==-1 and bearDisplacement
+            sigState:=2
+            sigDispBar:=bar_index
+            sigDispEvent:=true
+            sigDispCount+=1
+
+    // Stage 2:
+    // Strict/Balanced require a genuine structural event.
+    // Diagnostic intentionally bypasses this gate after displacement so we can
+    // verify the downstream POI/retest/entry plumbing independently.
+    if sigState==2 and not na(sigDispBar)
+        if signalSensitivity=="Diagnostic"
+            sigState:=3
+            sigShiftBar:=bar_index
+            sigShiftType:="DIAG"
+            sigShiftEvent:=true
+            sigShiftCount+=1
+        else if bar_index>sigDispBar+signalShiftWindow
+            sigState:=7
+            sigExpireCount+=1
+        else if sigSide==1 and bullShiftAllowed
+            sigState:=3
+            sigShiftBar:=bar_index
+            sigShiftType:=(iBullMSS or xBullMSS)?"MSS":(iBullCH or xBullCH)?"CHoCH":"BOS"
+            sigShiftEvent:=true
+            sigShiftCount+=1
+        else if sigSide==-1 and bearShiftAllowed
+            sigState:=3
+            sigShiftBar:=bar_index
+            sigShiftType:=(iBearMSS or xBearMSS)?"MSS":(iBearCH or xBearCH)?"CHoCH":"BOS"
+            sigShiftEvent:=true
+            sigShiftCount+=1
+
+    // Stage 3: select a directional POI that was created on/after the shift.
+    if sigState==3 and not na(sigShiftBar)
+        if bar_index>sigShiftBar+signalPOIWindow
+            sigState:=7
+            sigExpireCount+=1
+        else
+            bool foundPOI=false
+            float foundTop=na
+            float foundBot=na
+            int foundBorn=na
+            string foundType="NONE"
+
+            if signalUseFVG and array.size(fvgStates)>0
+                for n=array.size(fvgStates)-1 to 0
+                    int st=array.get(fvgStates,n)
+                    int dir=array.get(fvgDirs,n)
+                    int born=array.get(fvgBornBars,n)
+                    bool activePOI=st==0 or st==2
+                    bool directionalBull=st==2?dir==-1:dir==1
+                    bool sideMatch=sigSide==1?directionalBull:not directionalBull
+                    if activePOI and sideMatch and ((signalSensitivity=="Diagnostic" and not na(sigSweepBar) and born>=sigSweepBar) or (signalSensitivity!="Diagnostic" and not na(sigDispBar) and born>=sigDispBar))
+                        foundPOI:=true
+                        foundTop:=array.get(fvgTops,n)
+                        foundBot:=array.get(fvgBots,n)
+                        foundBorn:=born
+                        foundType:=st==2?"IFVG":"FVG"
+                        break
+
+            if not foundPOI and signalUseOB and array.size(obStates)>0
+                for n=array.size(obStates)-1 to 0
+                    int st=array.get(obStates,n)
+                    int dir=array.get(obDirs,n)
+                    int born=array.get(obBornBars,n)
+                    bool active=st<=2
+                    bool directionalBull=st==2?dir==-1:dir==1
+                    bool sideMatch=sigSide==1?directionalBull:not directionalBull
+                    if active and sideMatch and ((signalSensitivity=="Diagnostic" and not na(sigSweepBar) and born>=sigSweepBar) or (signalSensitivity!="Diagnostic" and not na(sigDispBar) and born>=sigDispBar))
+                        foundPOI:=true
+                        foundTop:=array.get(obTops,n)
+                        foundBot:=array.get(obBots,n)
+                        foundBorn:=born
+                        foundType:=st==2?"BB":"OB"
+                        break
+
+            bool pdOK=not requireSignalPDLocation or (sigSide==1?inDiscount:inPremium)
+            if foundPOI and pdOK
+                sigState:=4
+                sigPOITop:=foundTop
+                sigPOIBot:=foundBot
+                sigPOIBornBar:=foundBorn
+                sigPOISelectBar:=bar_index
+                sigPOIType:=foundType
+                sigPOIEvent:=true
+                sigPOICount+=1
+
+    // Stage 4: POI interaction / reclaim after POI selection.
+    // A selected POI may confirm through normal mitigation/reclaim or through
+    // a boundary sweep-and-reclaim. A same-bar sweep/reclaim may trigger even
+    // when the wick-consumption lifecycle retires the zone on that candle.
+    if sigState==4 and not na(sigPOISelectBar)
+        bool poiStillActive=false
+
+        if sigPOIType=="FVG" or sigPOIType=="IFVG"
+            if array.size(fvgStates)>0
+                for n=array.size(fvgStates)-1 to 0
+                    int st=array.get(fvgStates,n)
+                    int born=array.get(fvgBornBars,n)
+                    bool typeMatch=sigPOIType=="FVG"?st==0:st==2
+                    if born==sigPOIBornBar and typeMatch
+                        poiStillActive:=true
+                        break
+
+        else if sigPOIType=="OB" or sigPOIType=="BB"
+            if array.size(obStates)>0
+                for n=array.size(obStates)-1 to 0
+                    int st=array.get(obStates,n)
+                    int born=array.get(obBornBars,n)
+                    bool typeMatch=sigPOIType=="OB"?st<=1:st==2
+                    if born==sigPOIBornBar and typeMatch
+                        poiStillActive:=true
+                        break
+
+        bool afterSelection=bar_index>sigPOISelectBar
+        bool touches=afterSelection and low<=sigPOITop and high>=sigPOIBot
+        float poiMid=(sigPOITop+sigPOIBot)/2
+
+        bool bullBoundarySweep=afterSelection and low<=sigPOIBot and close>sigPOIBot
+        bool bearBoundarySweep=afterSelection and high>=sigPOITop and close<sigPOITop
+        bool bullMitigationReclaim=touches and close>poiMid
+        bool bearMitigationReclaim=touches and close<poiMid
+        bool bullDirectional=touches and close>open
+        bool bearDirectional=touches and close<open
+        bool bullMidpoint=touches and close>poiMid and close>open
+        bool bearMidpoint=touches and close<poiMid and close<open
+
+        bool bullReaction=signalSensitivity=="Diagnostic"?touches:
+             signalRetestMode=="Boundary sweep reclaim"?bullBoundarySweep:
+             signalRetestMode=="Mitigation reclaim"?bullMitigationReclaim:
+             signalRetestMode=="Touch only"?touches:
+             signalRetestMode=="Midpoint reaction"?bullMidpoint:
+             bullDirectional
+
+        bool bearReaction=signalSensitivity=="Diagnostic"?touches:
+             signalRetestMode=="Boundary sweep reclaim"?bearBoundarySweep:
+             signalRetestMode=="Mitigation reclaim"?bearMitigationReclaim:
+             signalRetestMode=="Touch only"?touches:
+             signalRetestMode=="Midpoint reaction"?bearMidpoint:
+             bearDirectional
+
+        bool sameBarSweepReclaim=sigSide==1?bullBoundarySweep:bearBoundarySweep
+        bool poiUsableNow=poiStillActive or sameBarSweepReclaim
+
+        if not poiUsableNow
+            sigState:=6
+            sigInvalidCount+=1
+            sigPOIInvalidBeforeRetestCount+=1
+
+        else if bar_index>sigPOISelectBar+signalRetestWindow
+            sigState:=7
+            sigExpireCount+=1
+            sigPOITimeoutCount+=1
+
+        else if afterSelection
+            bool duplicateSetup=not na(lastTriggeredSweepBar) and sigSweepBar==lastTriggeredSweepBar and sigPOIBornBar==lastTriggeredPOIBornBar and sigPOIType==lastTriggeredPOIType
+
+            revSignalScore:=f_scoreSignal(1,"REV",sigShiftType,sigPOIType)
+            if not duplicateSetup and sigSide==1 and barstate.isconfirmed and bullReaction and f_biasAllows(1) and f_scoreAllows(revSignalScore)
+                longSignal:=true
+                lastSignalScore:=revSignalScore
+                lastSignalFamily:="REV"
+                lastSignalGrade:=f_scoreGrade(revSignalScore)
+                sigState:=5
+                lastTriggeredSweepBar:=sigSweepBar
+                lastTriggeredPOIBornBar:=sigPOIBornBar
+                lastTriggeredPOIType:=sigPOIType
+                sigTriggerCount+=1
+                if bullBoundarySweep
+                    sigSweepReclaimCount+=1
+
+            revSignalScore:=f_scoreSignal(-1,"REV",sigShiftType,sigPOIType)
+            if not duplicateSetup and sigSide==-1 and barstate.isconfirmed and bearReaction and f_biasAllows(-1) and f_scoreAllows(revSignalScore)
+                shortSignal:=true
+                lastSignalScore:=revSignalScore
+                lastSignalFamily:="REV"
+                lastSignalGrade:=f_scoreGrade(revSignalScore)
+                sigState:=5
+                lastTriggeredSweepBar:=sigSweepBar
+                lastTriggeredPOIBornBar:=sigPOIBornBar
+                lastTriggeredPOIType:=sigPOIType
+                sigTriggerCount+=1
+                if bearBoundarySweep
+                    sigSweepReclaimCount+=1
+
+//=============================================================================
+// RISK / TRADE PROJECTION
+//=============================================================================
+var bool riskActive=false
+var int riskSide=0
+var string riskFamily="NONE"
+var float riskEntry=na
+var float riskSL=na
+var float riskTP1=na
+var float riskTP2=na
+var float riskTP3=na
+var string riskTP1Source="R"
+var string riskTP2Source="R"
+var string riskTP3Source="R"
+var float riskInitialSL=na
+var float riskInitialDistance=na
+var bool riskBEActive=false
+var float riskBEPrice=na
+var int riskStartBar=na
+var bool riskTP1Hit=false
+var bool riskTP2Hit=false
+var bool riskTP3Hit=false
+var string riskStatus="IDLE"
+
+var line riskEntryLine=na
+var line riskSLLine=na
+var line riskTP1Line=na
+var line riskTP2Line=na
+var line riskTP3Line=na
+
+f_deleteRiskLines() =>
+    if not na(riskEntryLine)
+        line.delete(riskEntryLine)
+    if not na(riskSLLine)
+        line.delete(riskSLLine)
+    if not na(riskTP1Line)
+        line.delete(riskTP1Line)
+    if not na(riskTP2Line)
+        line.delete(riskTP2Line)
+    if not na(riskTP3Line)
+        line.delete(riskTP3Line)
+
+f_priceText(v) =>
+    na(v)?"—":str.tostring(v,format.mintick)
+
+f_rText(float price,float entry,float dist) =>
+    na(price) or na(entry) or na(dist) or dist<=0?"—":str.tostring(math.abs(price-entry)/dist,"#.##")+"R"
+
+f_targetText(float price,string source,float entry,float dist) =>
+    na(price)?"—":source+" · "+f_rText(price,entry,dist)
+
+f_betterTarget(int side,float candidate,float current) =>
+    na(current) or (side==1?candidate<current:candidate>current)
+
+f_findLiquidityTarget(int side,float entry,float minDistance,float priorTarget) =>
+    float best=na
+    string bestSource="NONE"
+    float threshold=side==1?entry+minDistance:entry-minDistance
+
+    // Active/current sessions: use their live extrema as valid near-term objectives.
+    if array.size(sessionActive)>0
+        for idx=0 to 2
+            bool active=array.get(sessionActive,idx)
+            if active
+                float candidate=side==1?array.get(sessionHi,idx):array.get(sessionLo,idx)
+                string src=f_sessionName(idx)+(side==1?" H":" L")
+                bool directionOK=not na(candidate) and (side==1?candidate>=threshold:candidate<=threshold)
+                bool beyondPrior=na(priorTarget) or (side==1?candidate>priorTarget+syminfo.mintick:candidate<priorTarget-syminfo.mintick)
+                if directionOK and beyondPrior and f_betterTarget(side,candidate,best)
+                    best:=candidate
+                    bestSource:=src
+
+    // Common active liquidity registry:
+    // category 0 = swing, 1 = previous D/W/M, 2 = completed session H/L.
+    if array.size(liquidity)>0
+        for n=0 to array.size(liquidity)-1
+            LiquidityLevel q=array.get(liquidity,n)
+            bool sideOK=side==1?q.buySide:not q.buySide
+            bool directionOK=side==1?q.price>=threshold:q.price<=threshold
+            bool beyondPrior=na(priorTarget) or (side==1?q.price>priorTarget+syminfo.mintick:q.price<priorTarget-syminfo.mintick)
+            if q.state==0 and sideOK and directionOK and beyondPrior and f_betterTarget(side,q.price,best)
+                best:=q.price
+                bestSource:=q.source
+
+    [best,bestSource]
+
+bool anyLongSignal=longSignal or contLongSignal or invLongSignal
+bool anyShortSignal=shortSignal or contShortSignal or invShortSignal
+bool anyNewSignal=anyLongSignal or anyShortSignal
+
+if enableRiskProjection and anyNewSignal
+    f_deleteRiskLines()
+
+    riskSide:=anyLongSignal?1:-1
+    riskFamily:=longSignal or shortSignal?"REV":contLongSignal or contShortSignal?"CONT":"INV"
+    riskEntry:=close
+    riskStartBar:=bar_index
+    riskTP1Hit:=false
+    riskTP2Hit:=false
+    riskTP3Hit:=false
+    riskBEActive:=false
+    riskBEPrice:=na
+    riskStatus:="ACTIVE"
+
+    float poiTop=riskFamily=="REV"?sigPOITop:riskFamily=="CONT"?contTop:invTop
+    float poiBot=riskFamily=="REV"?sigPOIBot:riskFamily=="CONT"?contBot:invBot
+
+    if stopLossMode=="POI boundary" and not na(poiTop) and not na(poiBot)
+        riskSL:=riskSide==1?poiBot-atr*stopATRBuffer:poiTop+atr*stopATRBuffer
+    else if stopLossMode=="Signal candle"
+        riskSL:=riskSide==1?low-atr*stopATRBuffer:high+atr*stopATRBuffer
+    else
+        riskSL:=riskSide==1?riskEntry-atr*atrStopMultiple:riskEntry+atr*atrStopMultiple
+
+    riskInitialSL:=riskSL
+    riskInitialDistance:=math.abs(riskEntry-riskSL)
+
+    float rTP1=riskSide==1?riskEntry+riskInitialDistance*tp1R:riskEntry-riskInitialDistance*tp1R
+    float rTP2=riskSide==1?riskEntry+riskInitialDistance*tp2R:riskEntry-riskInitialDistance*tp2R
+    float rTP3=riskSide==1?riskEntry+riskInitialDistance*tp3R:riskEntry-riskInitialDistance*tp3R
+
+    float liqTP1=na
+    float liqTP2=na
+    float liqTP3=na
+    string liqTP1Source="NONE"
+    string liqTP2Source="NONE"
+    string liqTP3Source="NONE"
+
+    if targetMode!="R-Multiple only" and riskInitialDistance>syminfo.mintick
+        [t1,s1]=f_findLiquidityTarget(riskSide,riskEntry,riskInitialDistance*tp1R,na)
+        liqTP1:=t1
+        liqTP1Source:=s1
+        [t2,s2]=f_findLiquidityTarget(riskSide,riskEntry,riskInitialDistance*tp2R,liqTP1)
+        liqTP2:=t2
+        liqTP2Source:=s2
+        [t3,s3]=f_findLiquidityTarget(riskSide,riskEntry,riskInitialDistance*tp3R,liqTP2)
+        liqTP3:=t3
+        liqTP3Source:=s3
+
+    if targetMode=="R-Multiple only"
+        riskTP1:=rTP1
+        riskTP2:=rTP2
+        riskTP3:=rTP3
+        riskTP1Source:="R"
+        riskTP2Source:="R"
+        riskTP3Source:="R"
+    else if targetMode=="Liquidity only"
+        riskTP1:=liqTP1
+        riskTP2:=liqTP2
+        riskTP3:=liqTP3
+        riskTP1Source:=liqTP1Source
+        riskTP2Source:=liqTP2Source
+        riskTP3Source:=liqTP3Source
+    else
+        riskTP1:=na(liqTP1)?rTP1:liqTP1
+        riskTP2:=na(liqTP2)?rTP2:liqTP2
+        riskTP3:=na(liqTP3)?rTP3:liqTP3
+        riskTP1Source:=na(liqTP1)?"R":liqTP1Source
+        riskTP2Source:=na(liqTP2)?"R":liqTP2Source
+        riskTP3Source:=na(liqTP3)?"R":liqTP3Source
+
+    riskActive:=riskInitialDistance>syminfo.mintick and not na(riskTP1)
+
+    if showRiskLines and riskActive
+        int x2=bar_index+riskProjectionBars
+        riskEntryLine:=line.new(bar_index,riskEntry,x2,riskEntry,xloc=xloc.bar_index,extend=extend.none,color=color.white,style=line.style_dotted,width=1)
+        riskSLLine:=line.new(bar_index,riskSL,x2,riskSL,xloc=xloc.bar_index,extend=extend.none,color=color.red,width=1)
+        if not na(riskTP1)
+            riskTP1Line:=line.new(bar_index,riskTP1,x2,riskTP1,xloc=xloc.bar_index,extend=extend.none,color=color.lime,width=1)
+        if not na(riskTP2)
+            riskTP2Line:=line.new(bar_index,riskTP2,x2,riskTP2,xloc=xloc.bar_index,extend=extend.none,color=color.lime,width=1)
+        if not na(riskTP3)
+            riskTP3Line:=line.new(bar_index,riskTP3,x2,riskTP3,xloc=xloc.bar_index,extend=extend.none,color=color.lime,width=1)
+
+if riskActive and bar_index>riskStartBar
+    bool stopped=riskSide==1?low<=riskSL:high>=riskSL
+    bool hit1=not na(riskTP1) and (riskSide==1?high>=riskTP1:low<=riskTP1)
+    bool hit2=not na(riskTP2) and (riskSide==1?high>=riskTP2:low<=riskTP2)
+    bool hit3=not na(riskTP3) and (riskSide==1?high>=riskTP3:low<=riskTP3)
+
+    riskTP1Hit:=riskTP1Hit or hit1
+    riskTP2Hit:=riskTP2Hit or hit2
+    riskTP3Hit:=riskTP3Hit or hit3
+
+    float oneRPrice=riskSide==1?riskEntry+riskInitialDistance:riskEntry-riskInitialDistance
+    float customRPrice=riskSide==1?riskEntry+riskInitialDistance*breakEvenCustomR:riskEntry-riskInitialDistance*breakEvenCustomR
+    bool oneRReached=riskSide==1?high>=oneRPrice:low<=oneRPrice
+    bool customRReached=riskSide==1?high>=customRPrice:low<=customRPrice
+    bool beTrigger=breakEvenMode=="After TP1"?riskTP1Hit:
+         breakEvenMode=="After 1R"?oneRReached:
+         breakEvenMode=="After TP2"?riskTP2Hit:
+         breakEvenMode=="Custom R"?customRReached:false
+
+    // Conservative same-bar handling: the stop in force at the start of the bar
+    // takes precedence. A newly triggered BE stop becomes effective after this bar.
+    if stopped
+        riskStatus:=riskBEActive?"BE EXIT":"STOPPED"
+        riskActive:=false
+    else
+        if not riskBEActive and breakEvenMode!="Off" and beTrigger
+            riskBEActive:=true
+            riskBEPrice:=riskSide==1?riskEntry+riskInitialDistance*breakEvenOffsetR:riskEntry-riskInitialDistance*breakEvenOffsetR
+            riskSL:=riskBEPrice
+            if not na(riskSLLine)
+                line.set_y1(riskSLLine,riskSL)
+                line.set_y2(riskSLLine,riskSL)
+
+        if riskTP3Hit
+            riskStatus:="TP3"
+            riskActive:=false
+        else if riskBEActive
+            riskStatus:=riskTP2Hit?"TP2 + BE":riskTP1Hit?"TP1 + BE":"BE ACTIVE"
+        else if riskTP2Hit
+            riskStatus:="TP2"
+        else if riskTP1Hit
+            riskStatus:="TP1"
+
+    if not riskActive and deleteRiskOnCompletion
+        f_deleteRiskLines()
+
+// Historical audit markers must be emitted before terminal reset.
+var label[] signalLabels=array.new_label()
+var label[] stageLabels=array.new_label()
+
+if showHistoricalSignalAudit and (sigState==6 or sigState==7)
+    string auditText=sigState==6?"POI×":"EXP"
+    float auditY=sigSide==1?low:high
+    label auditLb=label.new(bar_index,auditY,auditText,style=label.style_none,textcolor=sigState==6?color.orange:color.gray,size=size.tiny)
+    array.push(stageLabels,auditLb)
+    while array.size(stageLabels)>maxStageLabels
+        label.delete(array.shift(stageLabels))
+
+if showSignalStages
+    if sigSweepEventLong
+        label sl=label.new(bar_index,low,"SWP",style=label.style_none,textcolor=longSignalColor,size=size.tiny)
+        array.push(stageLabels,sl)
+        while array.size(stageLabels)>maxStageLabels
+            label.delete(array.shift(stageLabels))
+    if sigSweepEventShort
+        label sl=label.new(bar_index,high,"SWP",style=label.style_none,textcolor=shortSignalColor,size=size.tiny)
+        array.push(stageLabels,sl)
+        while array.size(stageLabels)>maxStageLabels
+            label.delete(array.shift(stageLabels))
+    if sigDispEvent
+        label sl=label.new(bar_index,sigSide==1?low:high,"DSP",style=label.style_none,textcolor=sigSide==1?longSignalColor:shortSignalColor,size=size.tiny)
+        array.push(stageLabels,sl)
+        while array.size(stageLabels)>maxStageLabels
+            label.delete(array.shift(stageLabels))
+    if sigShiftEvent
+        label sl=label.new(bar_index,sigSide==1?low:high,sigShiftType,style=label.style_none,textcolor=sigSide==1?longSignalColor:shortSignalColor,size=size.tiny)
+        array.push(stageLabels,sl)
+        while array.size(stageLabels)>maxStageLabels
+            label.delete(array.shift(stageLabels))
+    if sigPOIEvent
+        label sl=label.new(bar_index,(sigPOITop+sigPOIBot)/2,"POI",style=label.style_none,textcolor=sigSide==1?longSignalColor:shortSignalColor,size=size.tiny)
+        array.push(stageLabels,sl)
+        while array.size(stageLabels)>maxStageLabels
+            label.delete(array.shift(stageLabels))
+
+if longSignal and showSignalLabels
+    label sigLb=label.new(bar_index,low,"REV LONG\n"+sigLiquiditySource+" → "+sigShiftType+" → "+sigPOIType+(showScoreOnLabels?"\nScore "+str.tostring(revSignalScore)+" ["+f_scoreGrade(revSignalScore)+"]":""),style=label.style_label_up,textcolor=color.white,color=longSignalColor,size=f_textSize())
+    array.push(signalLabels,sigLb)
+    while array.size(signalLabels)>maxSignalLabels
+        label.delete(array.shift(signalLabels))
+
+if shortSignal and showSignalLabels
+    label sigLb=label.new(bar_index,high,"REV SHORT\n"+sigLiquiditySource+" → "+sigShiftType+" → "+sigPOIType+(showScoreOnLabels?"\nScore "+str.tostring(revSignalScore)+" ["+f_scoreGrade(revSignalScore)+"]":""),style=label.style_label_down,textcolor=color.white,color=shortSignalColor,size=f_textSize())
+    array.push(signalLabels,sigLb)
+    while array.size(signalLabels)>maxSignalLabels
+        label.delete(array.shift(signalLabels))
+
+if contLongSignal and showSignalLabels
+    label sigLb=label.new(bar_index,low,"CONT LONG\n"+contPOIType+" → BOS → "+contPOIType+(showScoreOnLabels?"\nScore "+str.tostring(contSignalScore)+" ["+f_scoreGrade(contSignalScore)+"]":""),style=label.style_label_up,textcolor=color.white,color=longSignalColor,size=f_textSize())
+    array.push(signalLabels,sigLb)
+    while array.size(signalLabels)>maxSignalLabels
+        label.delete(array.shift(signalLabels))
+
+if contShortSignal and showSignalLabels
+    label sigLb=label.new(bar_index,high,"CONT SHORT\n"+contPOIType+" → BOS → "+contPOIType+(showScoreOnLabels?"\nScore "+str.tostring(contSignalScore)+" ["+f_scoreGrade(contSignalScore)+"]":""),style=label.style_label_down,textcolor=color.white,color=shortSignalColor,size=f_textSize())
+    array.push(signalLabels,sigLb)
+    while array.size(signalLabels)>maxSignalLabels
+        label.delete(array.shift(signalLabels))
+
+if invLongSignal and showSignalLabels
+    label sigLb=label.new(bar_index,low,"INV LONG\n"+invPOIType+" → "+invStructType+" → "+invPOIType+(showScoreOnLabels?"\nScore "+str.tostring(invSignalScore)+" ["+f_scoreGrade(invSignalScore)+"]":""),style=label.style_label_up,textcolor=color.white,color=longSignalColor,size=f_textSize())
+    array.push(signalLabels,sigLb)
+    while array.size(signalLabels)>maxSignalLabels
+        label.delete(array.shift(signalLabels))
+
+if invShortSignal and showSignalLabels
+    label sigLb=label.new(bar_index,high,"INV SHORT\n"+invPOIType+" → "+invStructType+" → "+invPOIType+(showScoreOnLabels?"\nScore "+str.tostring(invSignalScore)+" ["+f_scoreGrade(invSignalScore)+"]":""),style=label.style_label_down,textcolor=color.white,color=shortSignalColor,size=f_textSize())
+    array.push(signalLabels,sigLb)
+    while array.size(signalLabels)>maxSignalLabels
+        label.delete(array.shift(signalLabels))
+
+// Inversion reset after its labels are rendered.
+if invState==3 or invState==4 or invState==5
+    invState:=0
+    invSide:=0
+    invPOIType:="NONE"
+    invPOIBornBar:=na
+    invTop:=na
+    invBot:=na
+    invStartBar:=na
+    invStructBar:=na
+    invStructType:="NONE"
+
+// Continuation reset after its labels are rendered.
+if contState==3 or contState==4 or contState==5
+    contState:=0
+    contSide:=0
+    contPOIType:="NONE"
+    contPOIBornBar:=na
+    contTop:=na
+    contBot:=na
+    contStartBar:=na
+    contBOSBar:=na
+
+// Terminal-state reset AFTER rendering signal/stage labels.
+// This preserves the completed setup's source, side, shift and POI metadata
+// long enough for historical TEST labels and audit visuals to be created.
+if sigState==5 or sigState==6 or sigState==7
+    sigState:=0
+    sigSide:=0
+    sigLiquiditySource:="NONE"
+    sigSweepBar:=na
+    sigDispBar:=na
+    sigShiftBar:=na
+    sigShiftType:="NONE"
+    sigPOISelectBar:=na
+    sigPOIBornBar:=na
+    sigPOITop:=na
+    sigPOIBot:=na
+    sigPOIType:="NONE"
+
+var table biasPanel=table.new(position.bottom_right,2,3)
+if barstate.islast
+    table.clear(biasPanel,0,0,1,2)
+    if showBiasPanel and not (showUnifiedDashboard and replaceMiniPanels)
+        table.cell(biasPanel,0,0,"HTF "+htfBiasTF)
+        table.cell(biasPanel,1,0,f_biasText(htfBias),text_color=f_biasColor(htfBias))
+        table.cell(biasPanel,0,1,"MTF "+mtfBiasTF)
+        table.cell(biasPanel,1,1,f_biasText(mtfBias),text_color=f_biasColor(mtfBias))
+        table.cell(biasPanel,0,2,"Filter")
+        table.cell(biasPanel,1,2,biasFilterMode)
+
+var table vwapPanel=table.new(position.bottom_left,2,5)
+if barstate.islast
+    table.clear(vwapPanel,0,0,1,4)
+    if showVWAPPanel and not (showUnifiedDashboard and replaceMiniPanels)
+        table.cell(vwapPanel,0,0,"Session")
+        table.cell(vwapPanel,1,0,f_vwapPos(sessionVWAP))
+        table.cell(vwapPanel,0,1,"Daily")
+        table.cell(vwapPanel,1,1,f_vwapPos(dailyVWAP))
+        table.cell(vwapPanel,0,2,"Weekly")
+        table.cell(vwapPanel,1,2,f_vwapPos(weeklyVWAP))
+        table.cell(vwapPanel,0,3,"Monthly")
+        table.cell(vwapPanel,1,3,f_vwapPos(monthlyVWAP))
+        table.cell(vwapPanel,0,4,"Filter")
+        table.cell(vwapPanel,1,4,vwapFilterMode)
+
+var table divPanel=table.new(position.middle_right,2,4)
+if barstate.islast
+    table.clear(divPanel,0,0,1,3)
+    if showDivergencePanel and not (showUnifiedDashboard and replaceMiniPanels)
+        table.cell(divPanel,0,0,"Bull RSI")
+        table.cell(divPanel,1,0,recentBullDiv and enableRSIDivergence?"Supportive":"—")
+        table.cell(divPanel,0,1,"Bear RSI")
+        table.cell(divPanel,1,1,recentBearDiv and enableRSIDivergence?"Supportive":"—")
+        table.cell(divPanel,0,2,"Bull/Bear ctx")
+        table.cell(divPanel,1,2,(recentBullDiv?"Bull ":"")+(recentBearDiv?"Bear":""))
+        table.cell(divPanel,0,3,"Filter")
+        table.cell(divPanel,1,3,divergenceFilterMode)
+
+var table scorePanel=table.new(position.middle_left,2,4)
+if barstate.islast
+    table.clear(scorePanel,0,0,1,3)
+    if showScorePanel and not (showUnifiedDashboard and replaceMiniPanels)
+        table.cell(scorePanel,0,0,"Last family")
+        table.cell(scorePanel,1,0,lastSignalFamily)
+        table.cell(scorePanel,0,1,"Last score")
+        table.cell(scorePanel,1,1,na(lastSignalScore)?"—":str.tostring(lastSignalScore))
+        table.cell(scorePanel,0,2,"Grade")
+        table.cell(scorePanel,1,2,lastSignalGrade)
+        table.cell(scorePanel,0,3,"Min score")
+        table.cell(scorePanel,1,3,scoreFilterMode=="Off"?"Off":str.tostring(minimumSignalScore))
+
+//=============================================================================
+// UNIFIED DASHBOARD
+//=============================================================================
+f_dashPos() =>
+    dashboardPosition=="Top Right"?position.top_right:
+     dashboardPosition=="Bottom Right"?position.bottom_right:
+     dashboardPosition=="Top Left"?position.top_left:
+     position.bottom_left
+
+f_dashSize() =>
+    dashboardTextSize=="Tiny"?size.tiny:dashboardTextSize=="Normal"?size.normal:size.small
+
+f_trendText(v) =>
+    v==1?"BULL":v==-1?"BEAR":"NEUTRAL"
+
+f_trendColor(v) =>
+    v==1?color.lime:v==-1?color.red:color.gray
+
+f_boolStateText(bullState,bearState) =>
+    bullState?"BULL":bearState?"BEAR":"NEUTRAL"
+
+f_boolStateColor(bullState,bearState) =>
+    bullState?color.lime:bearState?color.red:color.gray
+
+f_sessionText() =>
+    asiaIn?"ASIA":londonIn?"LONDON":nyIn?"NEW YORK":"OFF"
+
+f_pdText() =>
+    if not pdZoneActive or na(pdZoneHigh) or na(pdZoneLow)
+        "N/A"
+    else
+        float eq=(pdZoneHigh+pdZoneLow)/2
+        close>eq?"PREMIUM":close<eq?"DISCOUNT":"EQ"
+
+f_latestStructureText() =>
+    string t="NONE"
+    if iBullMSS or xBullMSS
+        t:="BULL MSS"
+    else if iBearMSS or xBearMSS
+        t:="BEAR MSS"
+    else if iBullCH or xBullCH
+        t:="BULL CHoCH"
+    else if iBearCH or xBearCH
+        t:="BEAR CHoCH"
+    else if iBullBreak or xBullBreak
+        t:="BULL BOS"
+    else if iBearBreak or xBearBreak
+        t:="BEAR BOS"
+    t
+
+f_latestLiquidityText() =>
+    string t="NONE"
+    if lastSignalFamily!="NONE"
+        t:=lastSignalFamily
+    if sigLiquiditySource!="NONE"
+        t:=sigLiquiditySource
+    t
+
+f_activeSetupText() =>
+    string t="NONE"
+    if sigState>0 and sigState<5
+        t:="REV "+(sigSide==1?"LONG":"SHORT")
+    else if contState>0 and contState<3
+        t:="CONT "+(contSide==1?"LONG":"SHORT")
+    else if invState>0 and invState<3
+        t:="INV "+(invSide==1?"LONG":"SHORT")
+    else if lastSignalFamily!="NONE"
+        t:=lastSignalFamily
+    t
+
+f_activeSetupStateText() =>
+    string t="IDLE"
+    if sigState==1
+        t:="WAIT DISPLACEMENT"
+    else if sigState==2
+        t:="WAIT SHIFT"
+    else if sigState==3
+        t:="WAIT POI"
+    else if sigState==4
+        t:="WAIT RETEST"
+    else if contState==1
+        t:="WAIT BOS"
+    else if contState==2
+        t:="WAIT RETEST"
+    else if invState==1
+        t:="WAIT STRUCTURE"
+    else if invState==2
+        t:="WAIT RETEST"
+    t
+
+f_activePOIText() =>
+    string t="NONE"
+    if sigState>0 and sigState<5 and sigPOIType!="NONE"
+        t:=sigPOIType
+    else if contState>0 and contState<3 and contPOIType!="NONE"
+        t:=contPOIType
+    else if invState>0 and invState<3 and invPOIType!="NONE"
+        t:=invPOIType
+    t
+
+f_activeScoreText() =>
+    na(lastSignalScore)?"—":str.tostring(lastSignalScore)+" ["+lastSignalGrade+"]"
+
+f_divContextText() =>
+    recentBullDiv and recentBearDiv?"BULL + BEAR":recentBullDiv?"BULL SUPPORT":recentBearDiv?"BEAR SUPPORT":"NONE"
+
+// Use fixed largest table, render subset by mode.
+var table arthaDash=table.new(f_dashPos(),2,33)
+
+if barstate.islast
+    table.clear(arthaDash,0,0,1,32)
+    if showUnifiedDashboard
+        int r=0
+
+        table.cell(arthaDash,0,r,"ARTHA",text_color=color.white,bgcolor=color.new(color.gray,70),text_size=f_dashSize())
+        table.cell(arthaDash,1,r,dashboardMode,text_color=color.white,bgcolor=color.new(color.gray,70),text_size=f_dashSize())
+        r+=1
+
+        table.cell(arthaDash,0,r,"HTF Bias",text_size=f_dashSize())
+        table.cell(arthaDash,1,r,f_biasText(htfBias),text_color=f_biasColor(htfBias),text_size=f_dashSize())
+        r+=1
+
+        table.cell(arthaDash,0,r,"MTF Bias",text_size=f_dashSize())
+        table.cell(arthaDash,1,r,f_biasText(mtfBias),text_color=f_biasColor(mtfBias),text_size=f_dashSize())
+        r+=1
+
+        table.cell(arthaDash,0,r,"Alignment",text_size=f_dashSize())
+        table.cell(arthaDash,1,r,mtfAligned?"ALIGNED":"MIXED",text_color=mtfAligned?color.lime:color.orange,text_size=f_dashSize())
+        r+=1
+
+        table.cell(arthaDash,0,r,"Session",text_size=f_dashSize())
+        table.cell(arthaDash,1,r,f_sessionText(),text_size=f_dashSize())
+        r+=1
+
+        table.cell(arthaDash,0,r,"P/D",text_size=f_dashSize())
+        table.cell(arthaDash,1,r,f_pdText(),text_size=f_dashSize())
+        r+=1
+
+        table.cell(arthaDash,0,r,"Structure",text_size=f_dashSize())
+        table.cell(arthaDash,1,r,f_latestStructureText(),text_size=f_dashSize())
+        r+=1
+
+        table.cell(arthaDash,0,r,"POI",text_size=f_dashSize())
+        table.cell(arthaDash,1,r,f_activePOIText(),text_size=f_dashSize())
+        r+=1
+
+        table.cell(arthaDash,0,r,"Setup",text_size=f_dashSize())
+        table.cell(arthaDash,1,r,f_activeSetupText(),text_size=f_dashSize())
+        r+=1
+
+        table.cell(arthaDash,0,r,"State",text_size=f_dashSize())
+        table.cell(arthaDash,1,r,f_activeSetupStateText(),text_size=f_dashSize())
+        r+=1
+
+        table.cell(arthaDash,0,r,"Score",text_size=f_dashSize())
+        table.cell(arthaDash,1,r,f_activeScoreText(),text_size=f_dashSize())
+        r+=1
+        table.cell(arthaDash,0,r,"Risk",text_size=f_dashSize())
+        table.cell(arthaDash,1,r,riskStatus,text_size=f_dashSize())
+        r+=1
+
+        if dashboardMode!="Compact"
+            table.cell(arthaDash,0,r,"Session VWAP",text_size=f_dashSize())
+            table.cell(arthaDash,1,r,f_vwapPos(sessionVWAP),text_size=f_dashSize())
+            r+=1
+
+            table.cell(arthaDash,0,r,"Daily VWAP",text_size=f_dashSize())
+            table.cell(arthaDash,1,r,f_vwapPos(dailyVWAP),text_size=f_dashSize())
+            r+=1
+
+            table.cell(arthaDash,0,r,"Weekly VWAP",text_size=f_dashSize())
+            table.cell(arthaDash,1,r,f_vwapPos(weeklyVWAP),text_size=f_dashSize())
+            r+=1
+
+            table.cell(arthaDash,0,r,"Monthly VWAP",text_size=f_dashSize())
+            table.cell(arthaDash,1,r,f_vwapPos(monthlyVWAP),text_size=f_dashSize())
+            r+=1
+
+            table.cell(arthaDash,0,r,"Divergence",text_size=f_dashSize())
+            table.cell(arthaDash,1,r,f_divContextText(),text_size=f_dashSize())
+            r+=1
+
+            table.cell(arthaDash,0,r,"Bias Filter",text_size=f_dashSize())
+            table.cell(arthaDash,1,r,biasFilterMode,text_size=f_dashSize())
+            r+=1
+
+            table.cell(arthaDash,0,r,"VWAP Filter",text_size=f_dashSize())
+            table.cell(arthaDash,1,r,vwapFilterMode,text_size=f_dashSize())
+            r+=1
+
+            table.cell(arthaDash,0,r,"Div Filter",text_size=f_dashSize())
+            table.cell(arthaDash,1,r,divergenceFilterMode,text_size=f_dashSize())
+            r+=1
+
+            table.cell(arthaDash,0,r,"Score Filter",text_size=f_dashSize())
+            table.cell(arthaDash,1,r,scoreFilterMode=="Off"?"Off":">="+str.tostring(minimumSignalScore),text_size=f_dashSize())
+            r+=1
+            table.cell(arthaDash,0,r,"Entry",text_size=f_dashSize())
+            table.cell(arthaDash,1,r,f_priceText(riskEntry),text_size=f_dashSize())
+            r+=1
+
+            table.cell(arthaDash,0,r,"SL",text_size=f_dashSize())
+            table.cell(arthaDash,1,r,f_priceText(riskSL)+(riskBEActive?" · BE":""),text_size=f_dashSize())
+            r+=1
+
+            table.cell(arthaDash,0,r,"TP1",text_size=f_dashSize())
+            table.cell(arthaDash,1,r,f_targetText(riskTP1,riskTP1Source,riskEntry,riskInitialDistance),text_size=f_dashSize())
+            r+=1
+
+            table.cell(arthaDash,0,r,"TP2",text_size=f_dashSize())
+            table.cell(arthaDash,1,r,f_targetText(riskTP2,riskTP2Source,riskEntry,riskInitialDistance),text_size=f_dashSize())
+            r+=1
+
+            table.cell(arthaDash,0,r,"TP3",text_size=f_dashSize())
+            table.cell(arthaDash,1,r,f_targetText(riskTP3,riskTP3Source,riskEntry,riskInitialDistance),text_size=f_dashSize())
+            r+=1
+
+            table.cell(arthaDash,0,r,"BE Trigger",text_size=f_dashSize())
+            table.cell(arthaDash,1,r,breakEvenMode,text_size=f_dashSize())
+            r+=1
+
+        if dashboardMode=="Diagnostic"
+            table.cell(arthaDash,0,r,"REV State",text_size=f_dashSize())
+            table.cell(arthaDash,1,r,str.tostring(sigState)+" / "+sigPOIType,text_size=f_dashSize())
+            r+=1
+
+            table.cell(arthaDash,0,r,"CONT State",text_size=f_dashSize())
+            table.cell(arthaDash,1,r,str.tostring(contState)+" / "+contPOIType,text_size=f_dashSize())
+            r+=1
+
+            table.cell(arthaDash,0,r,"INV State",text_size=f_dashSize())
+            table.cell(arthaDash,1,r,str.tostring(invState)+" / "+invPOIType,text_size=f_dashSize())
+            r+=1
+
+            table.cell(arthaDash,0,r,"Risk Family",text_size=f_dashSize())
+            table.cell(arthaDash,1,r,riskFamily+" / "+riskStatus,text_size=f_dashSize())
+            r+=1
+//=============================================================================
+// DIAGNOSTICS
+//=============================================================================
+int activeLiq=0
+int sweptLiq=0
+int resolvedLiq=0
+if array.size(liquidity)>0
+    for n=0 to array.size(liquidity)-1
+        LiquidityLevel q=array.get(liquidity,n)
+        if q.state==0
+            activeLiq+=1
+        else if q.state==1
+            sweptLiq+=1
+        else if q.state==2
+            resolvedLiq+=1
+
+int activeFVG=0
+int mitigatedFVG=0
+int activeIFVG=0
+int mitigatedIFVG=0
+if array.size(fvgStates)>0
+    for n=0 to array.size(fvgStates)-1
+        int st=array.get(fvgStates,n)
+        bool fMit=array.get(fvgMitigated,n)
+        bool iMit=array.get(ifvgMitigated,n)
+        if st==0
+            activeFVG+=1
+            if fMit
+                mitigatedFVG+=1
+        else if st==2
+            activeIFVG+=1
+            if iMit
+                mitigatedIFVG+=1
+
+int activeOB=0
+int activeBB=0
+if array.size(obStates)>0
+    for n=0 to array.size(obStates)-1
+        int st=array.get(obStates,n)
+        if st==0 or st==1
+            activeOB+=1
+        else if st==2
+            activeBB+=1
+
+f_sigStateText(int st) =>
+    st==0?"IDLE":st==1?"WAIT_DISPLACEMENT":st==2?"WAIT_SHIFT":st==3?"WAIT_POI":st==4?"WAIT_RETEST":st==5?"TRIGGERED":st==6?"INVALIDATED":"EXPIRED"
+
+var table diag=table.new(position.top_right,2,48)
+if barstate.islast
+    table.clear(diag,0,0,1,47)
+    if diagnostic and not showUnifiedDashboard
+        table.cell(diag,0,0,"ARTHA MASTER")
+        table.cell(diag,1,0,"v1.2.2 TEST")
+        table.cell(diag,0,1,"Display")
+        table.cell(diag,1,1,displayMode)
+        table.cell(diag,0,2,"Internal trend")
+        table.cell(diag,1,2,iTrend==1?"BULL":iTrend==-1?"BEAR":"NEUTRAL")
+        table.cell(diag,0,3,"External trend")
+        table.cell(diag,1,3,xTrend==1?"BULL":xTrend==-1?"BEAR":"NEUTRAL")
+        table.cell(diag,0,4,"Internal BOS/CH/MSS")
+        table.cell(diag,1,4,str.tostring(internalBOSCount)+"/"+str.tostring(internalCHCount)+"/"+str.tostring(internalMSSCount))
+        table.cell(diag,0,5,"External BOS/CH/MSS")
+        table.cell(diag,1,5,str.tostring(externalBOSCount)+"/"+str.tostring(externalCHCount)+"/"+str.tostring(externalMSSCount))
+        table.cell(diag,0,6,"Liquidity A/S/R")
+        table.cell(diag,1,6,str.tostring(activeLiq)+" / "+str.tostring(sweptLiq)+" / "+str.tostring(resolvedLiq))
+        table.cell(diag,0,7,"Latest sweep")
+        table.cell(diag,1,7,latestSweepSource)
+        table.cell(diag,0,8,"FVG / IFVG")
+        table.cell(diag,1,8,str.tostring(activeFVG)+"("+str.tostring(mitigatedFVG)+"M) / "+str.tostring(activeIFVG)+"("+str.tostring(mitigatedIFVG)+"M)")
+        table.cell(diag,0,9,"OB / BB")
+        table.cell(diag,1,9,str.tostring(activeOB)+" / "+str.tostring(activeBB))
+        table.cell(diag,0,10,"P/D")
+        table.cell(diag,1,10,pdZoneActive?(pdZoneDirection==1?"BULL":"BEAR")+" #"+str.tostring(pdZoneVersion):"NONE")
+        table.cell(diag,0,11,"P/D source")
+        table.cell(diag,1,11,pdZoneSource)
+        table.cell(diag,0,12,"Asia")
+        table.cell(diag,1,12,asiaIn?"ACTIVE":"CLOSED")
+        table.cell(diag,0,13,"London")
+        table.cell(diag,1,13,londonIn?"ACTIVE":"CLOSED")
+        table.cell(diag,0,14,"New York")
+        table.cell(diag,1,14,nyIn?"ACTIVE":"CLOSED")
+        table.cell(diag,0,15,"Signal state")
+        table.cell(diag,1,15,f_sigStateText(sigState))
+        table.cell(diag,0,16,"Signal side")
+        table.cell(diag,1,16,sigSide==1?"LONG":sigSide==-1?"SHORT":"NONE")
+        table.cell(diag,0,17,"Signal liquidity")
+        table.cell(diag,1,17,sigLiquiditySource)
+        table.cell(diag,0,18,"Signal shift")
+        table.cell(diag,1,18,sigShiftType)
+        table.cell(diag,0,19,"Signal POI")
+        table.cell(diag,1,19,sigPOIType)
+        table.cell(diag,0,20,"Stage bars S/D/M/P")
+        table.cell(diag,1,20,str.tostring(sigSweepBar)+" / "+str.tostring(sigDispBar)+" / "+str.tostring(sigShiftBar)+" / "+str.tostring(sigPOISelectBar))
+        table.cell(diag,0,21,"Current displacement")
+        table.cell(diag,1,21,str.tostring(disp,"#.##"))
+        table.cell(diag,0,22,"Signal sensitivity")
+        table.cell(diag,1,22,signalSensitivity)
+        table.cell(diag,0,23,"Starts / displacement")
+        table.cell(diag,1,23,str.tostring(sigStartCount)+" / "+str.tostring(sigDispCount))
+        table.cell(diag,0,24,"Shifts / POIs")
+        table.cell(diag,1,24,str.tostring(sigShiftCount)+" / "+str.tostring(sigPOICount))
+        table.cell(diag,0,25,"Signals / invalid / exp")
+        table.cell(diag,1,25,str.tostring(sigTriggerCount)+" / "+str.tostring(sigInvalidCount)+" / "+str.tostring(sigExpireCount))
+        table.cell(diag,0,26,"POI invalid / timeout")
+        table.cell(diag,1,26,str.tostring(sigPOIInvalidBeforeRetestCount)+" / "+str.tostring(sigPOITimeoutCount))
+        table.cell(diag,0,27,"Sweep-reclaim signals")
+        table.cell(diag,1,27,str.tostring(sigSweepReclaimCount))
+        table.cell(diag,0,28,"CONT signals/inv/exp")
+        table.cell(diag,1,28,str.tostring(contTriggerCount)+" / "+str.tostring(contInvalidCount)+" / "+str.tostring(contExpireCount))
+        table.cell(diag,0,29,"CONT state / POI")
+        table.cell(diag,1,29,str.tostring(contState)+" / "+contPOIType)
+        table.cell(diag,0,30,"INV signals/inv/exp")
+        table.cell(diag,1,30,str.tostring(invTriggerCount)+" / "+str.tostring(invInvalidCount)+" / "+str.tostring(invExpireCount))
+        table.cell(diag,0,31,"INV state / POI")
+        table.cell(diag,1,31,str.tostring(invState)+" / "+invPOIType)
+        table.cell(diag,0,32,"HTF bias")
+        table.cell(diag,1,32,f_biasText(htfBias),text_color=f_biasColor(htfBias))
+        table.cell(diag,0,33,"MTF bias")
+        table.cell(diag,1,33,f_biasText(mtfBias),text_color=f_biasColor(mtfBias))
+        table.cell(diag,0,34,"Bias alignment")
+        table.cell(diag,1,34,mtfAligned?"Aligned":"Mixed",text_color=mtfAligned?color.lime:color.orange)
+        table.cell(diag,0,35,"Session VWAP")
+        table.cell(diag,1,35,f_vwapPos(sessionVWAP))
+        table.cell(diag,0,36,"Daily VWAP")
+        table.cell(diag,1,36,f_vwapPos(dailyVWAP))
+        table.cell(diag,0,37,"Weekly VWAP")
+        table.cell(diag,1,37,f_vwapPos(weeklyVWAP))
+        table.cell(diag,0,38,"Monthly VWAP")
+        table.cell(diag,1,38,f_vwapPos(monthlyVWAP))
+        table.cell(diag,0,39,"VWAP filter")
+        table.cell(diag,1,39,vwapFilterMode)
+        table.cell(diag,0,40,"Bull divergence")
+        table.cell(diag,1,40,recentBullDiv?"Supportive":"None")
+        table.cell(diag,0,41,"Bear divergence")
+        table.cell(diag,1,41,recentBearDiv?"Supportive":"None")
+        table.cell(diag,0,42,"Last bull/bear div")
+        table.cell(diag,1,42,(na(lastBullDivBar)?"—":str.tostring(bar_index-lastBullDivBar))+" / "+(na(lastBearDivBar)?"—":str.tostring(bar_index-lastBearDivBar)))
+        table.cell(diag,0,43,"Divergence filter")
+        table.cell(diag,1,43,divergenceFilterMode)
+        table.cell(diag,0,44,"Last signal family")
+        table.cell(diag,1,44,lastSignalFamily)
+        table.cell(diag,0,45,"Last signal score")
+        table.cell(diag,1,45,na(lastSignalScore)?"—":str.tostring(lastSignalScore))
+        table.cell(diag,0,46,"Last signal grade")
+        table.cell(diag,1,46,lastSignalGrade)
+        table.cell(diag,0,47,"Score filter")
+        table.cell(diag,1,47,scoreFilterMode=="Off"?"Off":">="+str.tostring(minimumSignalScore))
+
+//=============================================================================
+// ALERTS
+//=============================================================================
+alertcondition(bullSweep,"ARTHA Bullish Liquidity Sweep","Confirmed sell-side liquidity sweep")
+alertcondition(bearSweep,"ARTHA Bearish Liquidity Sweep","Confirmed buy-side liquidity sweep")
+alertcondition(iBullBOS or xBullBOS,"ARTHA Bullish BOS","Confirmed bullish BOS")
+alertcondition(iBearBOS or xBearBOS,"ARTHA Bearish BOS","Confirmed bearish BOS")
+alertcondition(iBullCH or xBullCH,"ARTHA Bullish CHoCH","Confirmed bullish CHoCH")
+alertcondition(iBearCH or xBearCH,"ARTHA Bearish CHoCH","Confirmed bearish CHoCH")
+alertcondition(iBullMSS or xBullMSS,"ARTHA Bullish MSS","Confirmed bullish MSS")
+alertcondition(iBearMSS or xBearMSS,"ARTHA Bearish MSS","Confirmed bearish MSS")
+alertcondition(bullFVG,"ARTHA Bullish FVG","Confirmed bullish FVG created")
+alertcondition(bearFVG,"ARTHA Bearish FVG","Confirmed bearish FVG created")
+alertcondition(ifvgBullEvent,"ARTHA Bullish IFVG","Confirmed bullish IFVG")
+alertcondition(ifvgBearEvent,"ARTHA Bearish IFVG","Confirmed bearish IFVG")
+alertcondition(bullBreakerEvent,"ARTHA Bullish Breaker","Confirmed bullish breaker")
+alertcondition(bearBreakerEvent,"ARTHA Bearish Breaker","Confirmed bearish breaker")
+alertcondition(newPDZone and newBullPD,"ARTHA Bullish P/D Range","New bullish structural P/D range")
+alertcondition(newPDZone and newBearPD,"ARTHA Bearish P/D Range","New bearish structural P/D range")
+alertcondition(longSignal,"ARTHA TEST LONG","Provisional ARTHA test LONG")
+alertcondition(shortSignal,"ARTHA TEST SHORT","Provisional ARTHA test SHORT")
+alertcondition(contLongSignal,"ARTHA CONT LONG","ARTHA continuation LONG")
+alertcondition(contShortSignal,"ARTHA CONT SHORT","ARTHA continuation SHORT")
+alertcondition(invLongSignal,"ARTHA INV LONG","ARTHA inversion LONG")
+alertcondition(invShortSignal,"ARTHA INV SHORT","ARTHA inversion SHORT")
