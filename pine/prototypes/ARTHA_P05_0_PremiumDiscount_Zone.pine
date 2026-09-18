@@ -1,0 +1,262 @@
+//@version=6
+indicator("ARTHA P05.0 — Premium / Discount Zone", overlay=true, max_boxes_count=10, max_lines_count=30, max_labels_count=30)
+
+//=============================================================================
+// ARTHA P05.0 — PREMIUM / DISCOUNT ZONE
+// - One active confirmed dealing range only.
+// - LOW -> HIGH = bullish range.
+// - HIGH -> LOW = bearish range.
+// - New confirmed range deletes the previous zone and all fib/PD labels.
+// - Plain-text labels only.
+// - Editable fib levels.
+// - No signal logic.
+//=============================================================================
+
+string GS = "01 Structure"
+int externalStrength = input.int(5, "External pivot strength", minval=1, maxval=20, group=GS)
+
+string GZ = "02 Zone"
+bool showZone = input.bool(true, "Show shaded zone", group=GZ)
+int zoneTransparency = input.int(88, "Zone transparency", minval=0, maxval=100, group=GZ)
+bool showPDLabels = input.bool(true, "Show Premium / EQ / Discount labels", group=GZ)
+
+string GF = "03 Fib Levels"
+bool showFibLevels = input.bool(true, "Show fib levels", group=GF)
+bool showFibLabels = input.bool(true, "Show fib labels", group=GF)
+float fib1 = input.float(0.000, "Fib 1", step=0.001, group=GF)
+float fib2 = input.float(0.250, "Fib 2", step=0.001, group=GF)
+float fib3 = input.float(0.500, "Fib 3", step=0.001, group=GF)
+float fib4 = input.float(0.750, "Fib 4", step=0.001, group=GF)
+float fib5 = input.float(1.000, "Fib 5", step=0.001, group=GF)
+
+string GD = "04 Diagnostics"
+bool diagnostic = input.bool(false, "Diagnostic panel", group=GD)
+
+float pivotHigh = ta.pivothigh(high, externalStrength, externalStrength)
+float pivotLow  = ta.pivotlow(low, externalStrength, externalStrength)
+bool newHigh = barstate.isconfirmed and not na(pivotHigh)
+bool newLow  = barstate.isconfirmed and not na(pivotLow)
+int pivotBar = bar_index - externalStrength
+
+var float lastHigh = na
+var int lastHighBar = na
+var float lastLow = na
+var int lastLowBar = na
+
+var float rangeHigh = na
+var float rangeLow = na
+var int rangeHighBar = na
+var int rangeLowBar = na
+var int rangeDirection = 0
+var int rangeCreatedBar = na
+var int rangeVersion = 0
+
+bool createBull = false
+bool createBear = false
+float candidateHigh = na
+float candidateLow = na
+int candidateHighBar = na
+int candidateLowBar = na
+
+if newHigh
+    int thisHighBar = pivotBar
+    float thisHigh = pivotHigh
+    if not na(lastLow) and not na(lastLowBar) and lastLowBar < thisHighBar
+        createBull := true
+        candidateLow := lastLow
+        candidateLowBar := lastLowBar
+        candidateHigh := thisHigh
+        candidateHighBar := thisHighBar
+    lastHigh := thisHigh
+    lastHighBar := thisHighBar
+
+if newLow
+    int thisLowBar = pivotBar
+    float thisLow = pivotLow
+    if not na(lastHigh) and not na(lastHighBar) and lastHighBar < thisLowBar
+        createBear := true
+        candidateHigh := lastHigh
+        candidateHighBar := lastHighBar
+        candidateLow := thisLow
+        candidateLowBar := thisLowBar
+    lastLow := thisLow
+    lastLowBar := thisLowBar
+
+bool newRange = (createBull or createBear) and candidateHigh > candidateLow
+
+var box rangeBox = na
+var line fibLine1 = na
+var line fibLine2 = na
+var line fibLine3 = na
+var line fibLine4 = na
+var line fibLine5 = na
+var label fibLabel1 = na
+var label fibLabel2 = na
+var label fibLabel3 = na
+var label fibLabel4 = na
+var label fibLabel5 = na
+var label premiumLabel = na
+var label eqLabel = na
+var label discountLabel = na
+
+f_deleteLine(line _ln) =>
+    if not na(_ln)
+        line.delete(_ln)
+
+f_deleteLabel(label _lb) =>
+    if not na(_lb)
+        label.delete(_lb)
+
+f_fibPrice(float _level) =>
+    rangeLow + (rangeHigh - rangeLow) * _level
+
+f_fibText(float _level) =>
+    str.tostring(_level, "#.###")
+
+if newRange
+    if not na(rangeBox)
+        box.delete(rangeBox)
+    f_deleteLine(fibLine1)
+    f_deleteLine(fibLine2)
+    f_deleteLine(fibLine3)
+    f_deleteLine(fibLine4)
+    f_deleteLine(fibLine5)
+    f_deleteLabel(fibLabel1)
+    f_deleteLabel(fibLabel2)
+    f_deleteLabel(fibLabel3)
+    f_deleteLabel(fibLabel4)
+    f_deleteLabel(fibLabel5)
+    f_deleteLabel(premiumLabel)
+    f_deleteLabel(eqLabel)
+    f_deleteLabel(discountLabel)
+
+    rangeHigh := candidateHigh
+    rangeLow := candidateLow
+    rangeHighBar := candidateHighBar
+    rangeLowBar := candidateLowBar
+    rangeDirection := createBull ? 1 : -1
+    rangeCreatedBar := bar_index
+    rangeVersion += 1
+
+    int leftBar = math.min(rangeHighBar, rangeLowBar)
+    rangeBox := box.new(leftBar, rangeHigh, bar_index, rangeLow, border_color=color.gray, bgcolor=color.new(color.gray, zoneTransparency))
+
+    float p1 = f_fibPrice(fib1)
+    float p2 = f_fibPrice(fib2)
+    float p3 = f_fibPrice(fib3)
+    float p4 = f_fibPrice(fib4)
+    float p5 = f_fibPrice(fib5)
+
+    fibLine1 := line.new(leftBar, p1, bar_index, p1)
+    fibLine2 := line.new(leftBar, p2, bar_index, p2)
+    fibLine3 := line.new(leftBar, p3, bar_index, p3, style=line.style_dashed)
+    fibLine4 := line.new(leftBar, p4, bar_index, p4)
+    fibLine5 := line.new(leftBar, p5, bar_index, p5)
+
+    fibLabel1 := label.new(bar_index, p1, f_fibText(fib1), style=label.style_none, size=size.tiny)
+    fibLabel2 := label.new(bar_index, p2, f_fibText(fib2), style=label.style_none, size=size.tiny)
+    fibLabel3 := label.new(bar_index, p3, f_fibText(fib3), style=label.style_none, size=size.tiny)
+    fibLabel4 := label.new(bar_index, p4, f_fibText(fib4), style=label.style_none, size=size.tiny)
+    fibLabel5 := label.new(bar_index, p5, f_fibText(fib5), style=label.style_none, size=size.tiny)
+
+    float premiumY = rangeLow + (rangeHigh - rangeLow) * 0.75
+    float eqY = rangeLow + (rangeHigh - rangeLow) * 0.50
+    float discountY = rangeLow + (rangeHigh - rangeLow) * 0.25
+    premiumLabel := label.new(bar_index, premiumY, "PREMIUM", style=label.style_none, size=size.small)
+    eqLabel := label.new(bar_index, eqY, "EQ", style=label.style_none, size=size.small)
+    discountLabel := label.new(bar_index, discountY, "DISCOUNT", style=label.style_none, size=size.small)
+
+bool rangeAvailable = not na(rangeHigh) and not na(rangeLow) and rangeHigh > rangeLow
+
+if rangeAvailable
+    int leftBar = math.min(rangeHighBar, rangeLowBar)
+    float p1 = f_fibPrice(fib1)
+    float p2 = f_fibPrice(fib2)
+    float p3 = f_fibPrice(fib3)
+    float p4 = f_fibPrice(fib4)
+    float p5 = f_fibPrice(fib5)
+
+    if not na(rangeBox)
+        box.set_left(rangeBox, leftBar)
+        box.set_right(rangeBox, bar_index)
+        box.set_top(rangeBox, rangeHigh)
+        box.set_bottom(rangeBox, rangeLow)
+        box.set_bgcolor(rangeBox, showZone ? color.new(color.gray, zoneTransparency) : color.new(color.gray, 100))
+        box.set_border_color(rangeBox, showZone ? color.gray : color.new(color.gray, 100))
+
+    if not na(fibLine1)
+        line.set_xy1(fibLine1, leftBar, p1)
+        line.set_xy2(fibLine1, bar_index, p1)
+        line.set_color(fibLine1, showFibLevels ? color.gray : color.new(color.gray, 100))
+    if not na(fibLine2)
+        line.set_xy1(fibLine2, leftBar, p2)
+        line.set_xy2(fibLine2, bar_index, p2)
+        line.set_color(fibLine2, showFibLevels ? color.gray : color.new(color.gray, 100))
+    if not na(fibLine3)
+        line.set_xy1(fibLine3, leftBar, p3)
+        line.set_xy2(fibLine3, bar_index, p3)
+        line.set_color(fibLine3, showFibLevels ? color.gray : color.new(color.gray, 100))
+    if not na(fibLine4)
+        line.set_xy1(fibLine4, leftBar, p4)
+        line.set_xy2(fibLine4, bar_index, p4)
+        line.set_color(fibLine4, showFibLevels ? color.gray : color.new(color.gray, 100))
+    if not na(fibLine5)
+        line.set_xy1(fibLine5, leftBar, p5)
+        line.set_xy2(fibLine5, bar_index, p5)
+        line.set_color(fibLine5, showFibLevels ? color.gray : color.new(color.gray, 100))
+
+    if not na(fibLabel1)
+        label.set_xy(fibLabel1, bar_index, p1)
+        label.set_text(fibLabel1, showFibLabels ? f_fibText(fib1) : "")
+    if not na(fibLabel2)
+        label.set_xy(fibLabel2, bar_index, p2)
+        label.set_text(fibLabel2, showFibLabels ? f_fibText(fib2) : "")
+    if not na(fibLabel3)
+        label.set_xy(fibLabel3, bar_index, p3)
+        label.set_text(fibLabel3, showFibLabels ? f_fibText(fib3) : "")
+    if not na(fibLabel4)
+        label.set_xy(fibLabel4, bar_index, p4)
+        label.set_text(fibLabel4, showFibLabels ? f_fibText(fib4) : "")
+    if not na(fibLabel5)
+        label.set_xy(fibLabel5, bar_index, p5)
+        label.set_text(fibLabel5, showFibLabels ? f_fibText(fib5) : "")
+
+    float premiumY = rangeLow + (rangeHigh - rangeLow) * 0.75
+    float eqY = rangeLow + (rangeHigh - rangeLow) * 0.50
+    float discountY = rangeLow + (rangeHigh - rangeLow) * 0.25
+
+    if not na(premiumLabel)
+        label.set_xy(premiumLabel, bar_index, premiumY)
+        label.set_text(premiumLabel, showPDLabels ? "PREMIUM" : "")
+    if not na(eqLabel)
+        label.set_xy(eqLabel, bar_index, eqY)
+        label.set_text(eqLabel, showPDLabels ? "EQ" : "")
+    if not na(discountLabel)
+        label.set_xy(discountLabel, bar_index, discountY)
+        label.set_text(discountLabel, showPDLabels ? "DISCOUNT" : "")
+
+string directionText = rangeDirection == 1 ? "BULLISH" : rangeDirection == -1 ? "BEARISH" : "NONE"
+var table t = table.new(position.top_right, 2, 8)
+
+if barstate.islast
+    table.clear(t, 0, 0, 1, 7)
+    if diagnostic
+        table.cell(t, 0, 0, "P05.0")
+        table.cell(t, 1, 0, "PD ZONE")
+        table.cell(t, 0, 1, "Range")
+        table.cell(t, 1, 1, rangeAvailable ? "ACTIVE" : "UNAVAILABLE")
+        table.cell(t, 0, 2, "Direction")
+        table.cell(t, 1, 2, directionText)
+        table.cell(t, 0, 3, "High")
+        table.cell(t, 1, 3, rangeAvailable ? str.tostring(rangeHigh) : "-")
+        table.cell(t, 0, 4, "Low")
+        table.cell(t, 1, 4, rangeAvailable ? str.tostring(rangeLow) : "-")
+        table.cell(t, 0, 5, "EQ")
+        table.cell(t, 1, 5, rangeAvailable ? str.tostring((rangeHigh + rangeLow) * 0.5) : "-")
+        table.cell(t, 0, 6, "Version")
+        table.cell(t, 1, 6, str.tostring(rangeVersion))
+        table.cell(t, 0, 7, "Created bar")
+        table.cell(t, 1, 7, na(rangeCreatedBar) ? "-" : str.tostring(rangeCreatedBar))
+
+alertcondition(newRange and createBull, "ARTHA Bullish PD Zone", "New confirmed bullish Premium/Discount zone")
+alertcondition(newRange and createBear, "ARTHA Bearish PD Zone", "New confirmed bearish Premium/Discount zone")
