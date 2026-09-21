@@ -1,0 +1,175 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/ MPL-2.0
+//@version=6
+indicator("FVG, IFVG, OB & BB Zones", "FVG/OB Zones", overlay = true, max_boxes_count = 500, calc_bars_count = 5000)
+
+// --- Constants ---
+string GROUP_DETECTION = "Detection"
+string GROUP_STYLE = "Style"
+string GROUP_ALERTS = "Alerts"
+
+color BULL_COLOR = #089981
+color BEAR_COLOR = #f23645
+color NEUTRAL_COLOR = #5b9cf6
+
+// --- Inputs ---
+bool showFvgInput = input.bool(true, "Fair value gaps", group = GROUP_DETECTION, tooltip = "Create bullish and bearish FVG zones from three-candle imbalances.")
+bool showIfvgInput = input.bool(true, "Inverse fair value gaps", group = GROUP_DETECTION, tooltip = "Convert an invalidated FVG into an inverse FVG that remains until it is filled.")
+bool showObInput = input.bool(true, "Order blocks", group = GROUP_DETECTION, tooltip = "Create order blocks from the last opposite candle before a confirmed structure break.")
+bool showBbInput = input.bool(true, "Breaker blocks", group = GROUP_DETECTION, tooltip = "Convert invalidated order blocks into breaker blocks.")
+int breakLookbackInput = input.int(10, "Structure lookback", minval = 2, maxval = 100, group = GROUP_DETECTION, tooltip = "Number of bars used to define the prior swing level for structure breaks.")
+int obLookbackInput = input.int(12, "Order block search", minval = 2, maxval = 100, group = GROUP_DETECTION, tooltip = "Maximum number of bars searched for the last opposite candle.")
+int maxZonesInput = input.int(80, "Maximum zones per type", minval = 5, maxval = 120, group = GROUP_DETECTION, tooltip = "Oldest zones are removed when this per-type limit is exceeded.")
+
+color bullFvgColorInput = input.color(color.new(BULL_COLOR, 82), "Bullish FVG", group = GROUP_STYLE)
+color bearFvgColorInput = input.color(color.new(BEAR_COLOR, 82), "Bearish FVG", group = GROUP_STYLE)
+color bullIfvgColorInput = input.color(color.new(BULL_COLOR, 68), "Bullish IFVG", group = GROUP_STYLE)
+color bearIfvgColorInput = input.color(color.new(BEAR_COLOR, 68), "Bearish IFVG", group = GROUP_STYLE)
+color bullObColorInput = input.color(color.new(NEUTRAL_COLOR, 82), "Bullish OB", group = GROUP_STYLE)
+color bearObColorInput = input.color(color.new(NEUTRAL_COLOR, 82), "Bearish OB", group = GROUP_STYLE)
+color bullBbColorInput = input.color(color.new(BULL_COLOR, 72), "Bullish BB", group = GROUP_STYLE)
+color bearBbColorInput = input.color(color.new(BEAR_COLOR, 72), "Bearish BB", group = GROUP_STYLE)
+
+bool alertsInput = input.bool(true, "Enable alert conditions", group = GROUP_ALERTS, tooltip = "Enable alert conditions for newly detected zones and conversions.")
+
+// --- Storage ---
+var array<box> fvgBoxes = array.new_box()
+var array<float> fvgTops = array.new_float()
+var array<float> fvgBottoms = array.new_float()
+var array<int> fvgDirs = array.new_int()
+
+var array<box> ifvgBoxes = array.new_box()
+var array<float> ifvgTops = array.new_float()
+var array<float> ifvgBottoms = array.new_float()
+var array<int> ifvgDirs = array.new_int()
+
+var array<box> obBoxes = array.new_box()
+var array<float> obTops = array.new_float()
+var array<float> obBottoms = array.new_float()
+var array<int> obDirs = array.new_int()
+
+var array<box> bbBoxes = array.new_box()
+var array<float> bbTops = array.new_float()
+var array<float> bbBottoms = array.new_float()
+var array<int> bbDirs = array.new_int()
+
+// --- Functions ---
+f_addZone(array<box> boxes, array<float> tops, array<float> bottoms, array<int> dirs, int leftIndex, float top, float bottom, int direction, color fillColor, color borderColor, string zoneText) =>
+    box zoneBox = box.new(left = leftIndex, top = top, right = bar_index, bottom = bottom, bgcolor = fillColor, border_color = borderColor, border_width = 1, text = zoneText, text_color = chart.fg_color, text_size = size.tiny, text_halign = text.align_center, text_valign = text.align_center)
+    array.push(boxes, zoneBox)
+    array.push(tops, top)
+    array.push(bottoms, bottom)
+    array.push(dirs, direction)
+    while array.size(boxes) > maxZonesInput
+        box.delete(array.shift(boxes))
+        array.shift(tops)
+        array.shift(bottoms)
+        array.shift(dirs)
+
+f_deleteAt(array<box> boxes, array<float> tops, array<float> bottoms, array<int> dirs, int index) =>
+    box.delete(array.get(boxes, index))
+    array.remove(boxes, index)
+    array.remove(tops, index)
+    array.remove(bottoms, index)
+    array.remove(dirs, index)
+
+// --- Detection ---
+float priorHigh = ta.highest(high, breakLookbackInput)[1]
+float priorLow = ta.lowest(low, breakLookbackInput)[1]
+bool bullishBreak = showObInput and not na(priorHigh) and ta.crossover(close, priorHigh)
+bool bearishBreak = showObInput and not na(priorLow) and ta.crossunder(close, priorLow)
+
+bool bullishFvgDetected = showFvgInput and bar_index >= 2 and low > high[2]
+bool bearishFvgDetected = showFvgInput and bar_index >= 2 and high < low[2]
+
+// --- Maintain FVGs and convert invalidated gaps into IFVGs ---
+if array.size(fvgBoxes) > 0
+    for index = array.size(fvgBoxes) - 1 to 0
+        int direction = array.get(fvgDirs, index)
+        float top = array.get(fvgTops, index)
+        float bottom = array.get(fvgBottoms, index)
+        bool invalidated = direction == 1 ? close < bottom : close > top
+        bool filled = direction == 1 ? low <= bottom : high >= top
+        if invalidated
+            if showIfvgInput
+                color inverseFill = direction == 1 ? bearIfvgColorInput : bullIfvgColorInput
+                color inverseBorder = direction == 1 ? BEAR_COLOR : BULL_COLOR
+                string inverseText = direction == 1 ? "IFVG ↓" : "IFVG ↑"
+                f_addZone(ifvgBoxes, ifvgTops, ifvgBottoms, ifvgDirs, box.get_left(array.get(fvgBoxes, index)), top, bottom, -direction, inverseFill, inverseBorder, inverseText)
+            f_deleteAt(fvgBoxes, fvgTops, fvgBottoms, fvgDirs, index)
+        else if filled
+            f_deleteAt(fvgBoxes, fvgTops, fvgBottoms, fvgDirs, index)
+        else
+            box.set_right(array.get(fvgBoxes, index), bar_index)
+
+// --- Maintain IFVGs until their zone is filled ---
+if array.size(ifvgBoxes) > 0
+    for index = array.size(ifvgBoxes) - 1 to 0
+        int direction = array.get(ifvgDirs, index)
+        float top = array.get(ifvgTops, index)
+        float bottom = array.get(ifvgBottoms, index)
+        bool filled = direction == 1 ? low <= bottom : high >= top
+        if filled
+            f_deleteAt(ifvgBoxes, ifvgTops, ifvgBottoms, ifvgDirs, index)
+        else
+            box.set_right(array.get(ifvgBoxes, index), bar_index)
+
+// --- Maintain order blocks and convert invalidated blocks into breakers ---
+if array.size(obBoxes) > 0
+    for index = array.size(obBoxes) - 1 to 0
+        int direction = array.get(obDirs, index)
+        float top = array.get(obTops, index)
+        float bottom = array.get(obBottoms, index)
+        bool invalidated = direction == 1 ? close < bottom : close > top
+        bool filled = direction == 1 ? low <= bottom : high >= top
+        if invalidated
+            if showBbInput
+                color breakerFill = direction == 1 ? bearBbColorInput : bullBbColorInput
+                color breakerBorder = direction == 1 ? BEAR_COLOR : BULL_COLOR
+                string breakerText = direction == 1 ? "BB ↓" : "BB ↑"
+                f_addZone(bbBoxes, bbTops, bbBottoms, bbDirs, box.get_left(array.get(obBoxes, index)), top, bottom, -direction, breakerFill, breakerBorder, breakerText)
+            f_deleteAt(obBoxes, obTops, obBottoms, obDirs, index)
+        else if filled
+            f_deleteAt(obBoxes, obTops, obBottoms, obDirs, index)
+        else
+            box.set_right(array.get(obBoxes, index), bar_index)
+
+// --- Maintain breaker blocks until their zone is filled ---
+if array.size(bbBoxes) > 0
+    for index = array.size(bbBoxes) - 1 to 0
+        int direction = array.get(bbDirs, index)
+        float top = array.get(bbTops, index)
+        float bottom = array.get(bbBottoms, index)
+        bool filled = direction == 1 ? low <= bottom : high >= top
+        if filled
+            f_deleteAt(bbBoxes, bbTops, bbBottoms, bbDirs, index)
+        else
+            box.set_right(array.get(bbBoxes, index), bar_index)
+
+// --- Create new FVGs ---
+if bullishFvgDetected
+    f_addZone(fvgBoxes, fvgTops, fvgBottoms, fvgDirs, bar_index - 2, low, high[2], 1, bullFvgColorInput, BULL_COLOR, "FVG ↑")
+if bearishFvgDetected
+    f_addZone(fvgBoxes, fvgTops, fvgBottoms, fvgDirs, bar_index - 2, low[2], high, -1, bearFvgColorInput, BEAR_COLOR, "FVG ↓")
+
+// --- Create order blocks from the last opposite candle before a structure break ---
+if bullishBreak
+    int bullishObOffset = na
+    for offset = 1 to obLookbackInput
+        if na(bullishObOffset) and not na(close[offset]) and close[offset] < open[offset]
+            bullishObOffset := offset
+    if not na(bullishObOffset)
+        f_addZone(obBoxes, obTops, obBottoms, obDirs, bar_index - bullishObOffset, high[bullishObOffset], low[bullishObOffset], 1, bullObColorInput, BULL_COLOR, "OB ↑")
+
+if bearishBreak
+    int bearishObOffset = na
+    for offset = 1 to obLookbackInput
+        if na(bearishObOffset) and not na(close[offset]) and close[offset] > open[offset]
+            bearishObOffset := offset
+    if not na(bearishObOffset)
+        f_addZone(obBoxes, obTops, obBottoms, obDirs, bar_index - bearishObOffset, high[bearishObOffset], low[bearishObOffset], -1, bearObColorInput, BEAR_COLOR, "OB ↓")
+
+// --- Alerts ---
+alertcondition(alertsInput and bullishFvgDetected, "Bullish FVG", "Bullish FVG detected on {{ticker}} {{interval}}")
+alertcondition(alertsInput and bearishFvgDetected, "Bearish FVG", "Bearish FVG detected on {{ticker}} {{interval}}")
+alertcondition(alertsInput and bullishBreak, "Bullish order block", "Bullish structure break and order block detected on {{ticker}} {{interval}}")
+alertcondition(alertsInput and bearishBreak, "Bearish order block", "Bearish structure break and order block detected on {{ticker}} {{interval}}")
