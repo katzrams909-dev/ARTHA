@@ -1,0 +1,406 @@
+//@version=6
+indicator("ARTHA Integrated Core I01.2 — P01.7 Regression Structure", overlay=true, max_lines_count=100, max_labels_count=500)
+
+//=============================================================================
+// ARTHA I01.2
+// Exact P01.7 structure-state regression core + safe time-based level renderer.
+//
+// IMPORTANT:
+// The calculation block below deliberately mirrors the uploaded/validated
+// ARTHA_P01_7_LiquidityStructureInteraction.pine structure logic.
+// Display-only swing classifications from P01.6 do not participate in breaks.
+//=============================================================================
+
+string GS="01 Structure"
+int iLen=input.int(2,"Internal pivot strength",minval=1,group=GS)
+int xLen=input.int(5,"External pivot strength",minval=2,group=GS)
+float mssATR=input.float(0.75,"MSS body / ATR",minval=0,step=0.05,group=GS)
+bool requireClose=input.bool(true,"Require close through structure",group=GS)
+
+string GD="02 Display"
+bool showStructure=input.bool(true,"Structure text",group=GD)
+bool showSwings=input.bool(true,"Swing labels",group=GD)
+bool showLevels=input.bool(true,"Active structure levels",group=GD)
+bool showProtected=input.bool(true,"Protected structure levels",group=GD)
+bool diagnostic=input.bool(false,"Diagnostic panel",group=GD)
+
+//================ SHARED DISPLACEMENT ================
+atr=ta.atr(14)
+body=math.abs(close-open)
+disp=atr>0?body/atr:0.0
+
+//================ PIVOTS / SWINGS — P01.7 ================
+iPH=ta.pivothigh(high,iLen,iLen)
+iPL=ta.pivotlow(low,iLen,iLen)
+xPH=ta.pivothigh(high,xLen,xLen)
+xPL=ta.pivotlow(low,xLen,xLen)
+
+var float iHigh=na
+var float iLow=na
+var int iHighBar=na
+var int iLowBar=na
+var float xHigh=na
+var float xLow=na
+var int xHighBar=na
+var int xLowBar=na
+
+// Display-only prior swing state for HH/HL/LH/LL.
+// This does NOT feed the structure break engine.
+var float iPriorHigh=na
+var float iPriorLow=na
+var float xPriorHigh=na
+var float xPriorLow=na
+var string iHighClass="NONE"
+var string iLowClass="NONE"
+var string xHighClass="NONE"
+var string xLowClass="NONE"
+
+if not na(iPH)
+    iPriorHigh:=iHigh
+    iHigh:=iPH
+    iHighBar:=bar_index-iLen
+    iHighClass:=na(iPriorHigh)?"HH":iHigh>iPriorHigh?"HH":"LH"
+
+if not na(iPL)
+    iPriorLow:=iLow
+    iLow:=iPL
+    iLowBar:=bar_index-iLen
+    iLowClass:=na(iPriorLow)?"HL":iLow>iPriorLow?"HL":"LL"
+
+if not na(xPH)
+    xPriorHigh:=xHigh
+    xHigh:=xPH
+    xHighBar:=bar_index-xLen
+    xHighClass:=na(xPriorHigh)?"HH":xHigh>xPriorHigh?"HH":"LH"
+
+if not na(xPL)
+    xPriorLow:=xLow
+    xLow:=xPL
+    xLowBar:=bar_index-xLen
+    xLowClass:=na(xPriorLow)?"HL":xLow>xPriorLow?"HL":"LL"
+
+//================ PERSISTENT BREAK TARGETS — P01.7 ================
+// They are not replaced by a newer pivot until the current target is consumed.
+var float iTargetHigh=na
+var int iTargetHighBar=na
+var int iTargetHighTime=na
+var bool iHighWaiting=false
+
+var float iTargetLow=na
+var int iTargetLowBar=na
+var int iTargetLowTime=na
+var bool iLowWaiting=false
+
+var float xTargetHigh=na
+var int xTargetHighBar=na
+var int xTargetHighTime=na
+var bool xHighWaiting=false
+
+var float xTargetLow=na
+var int xTargetLowBar=na
+var int xTargetLowTime=na
+var bool xLowWaiting=false
+
+if not na(iPH) and not iHighWaiting
+    iTargetHigh:=iPH
+    iTargetHighBar:=bar_index-iLen
+    iTargetHighTime:=time[iLen]
+    iHighWaiting:=true
+
+if not na(iPL) and not iLowWaiting
+    iTargetLow:=iPL
+    iTargetLowBar:=bar_index-iLen
+    iTargetLowTime:=time[iLen]
+    iLowWaiting:=true
+
+if not na(xPH) and not xHighWaiting
+    xTargetHigh:=xPH
+    xTargetHighBar:=bar_index-xLen
+    xTargetHighTime:=time[xLen]
+    xHighWaiting:=true
+
+if not na(xPL) and not xLowWaiting
+    xTargetLow:=xPL
+    xTargetLowBar:=bar_index-xLen
+    xTargetLowTime:=time[xLen]
+    xLowWaiting:=true
+
+//================ TREND / PROTECTED STATE — P01.7 ================
+var int iTrend=0
+var int xTrend=0
+var float iProtectedLow=na
+var float iProtectedHigh=na
+var float xProtectedLow=na
+var float xProtectedHigh=na
+
+// Display-only bars/times for protected structure.
+var int iProtectedLowBar=na
+var int iProtectedHighBar=na
+var int xProtectedLowBar=na
+var int xProtectedHighBar=na
+var int iProtectedLowTime=na
+var int iProtectedHighTime=na
+var int xProtectedLowTime=na
+var int xProtectedHighTime=na
+
+oldITrend=iTrend
+oldXTrend=xTrend
+
+// EXACT P01.7 break expressions.
+iBullBreak=barstate.isconfirmed and iHighWaiting and not na(iTargetHigh) and (requireClose?close>iTargetHigh:high>iTargetHigh)
+iBearBreak=barstate.isconfirmed and iLowWaiting and not na(iTargetLow) and (requireClose?close<iTargetLow:low<iTargetLow)
+xBullBreak=barstate.isconfirmed and xHighWaiting and not na(xTargetHigh) and (requireClose?close>xTargetHigh:high>xTargetHigh)
+xBearBreak=barstate.isconfirmed and xLowWaiting and not na(xTargetLow) and (requireClose?close<xTargetLow:low<xTargetLow)
+
+// EXACT P01.7 event classification.
+iBullMSS=iBullBreak and oldITrend<0 and disp>=mssATR
+iBearMSS=iBearBreak and oldITrend>0 and disp>=mssATR
+xBullMSS=xBullBreak and oldXTrend<0 and disp>=mssATR
+xBearMSS=xBearBreak and oldXTrend>0 and disp>=mssATR
+
+iBullCH=iBullBreak and oldITrend<0 and not iBullMSS
+iBearCH=iBearBreak and oldITrend>0 and not iBearMSS
+xBullCH=xBullBreak and oldXTrend<0 and not xBullMSS
+xBearCH=xBearBreak and oldXTrend>0 and not xBearMSS
+
+iBullBOS=iBullBreak and not iBullCH and not iBullMSS
+iBearBOS=iBearBreak and not iBearCH and not iBearMSS
+xBullBOS=xBullBreak and not xBullCH and not xBullMSS
+xBearBOS=xBearBreak and not xBearCH and not xBearMSS
+
+// Capture destination/protected timestamps before trend mutation.
+if iBullBreak
+    iHighWaiting:=false
+    iProtectedLow:=iLow
+    iProtectedLowBar:=iLowBar
+    iProtectedLowTime:=not na(iLowBar) ? time[bar_index-iLowBar] : na
+    iTrend:=1
+
+if iBearBreak
+    iLowWaiting:=false
+    iProtectedHigh:=iHigh
+    iProtectedHighBar:=iHighBar
+    iProtectedHighTime:=not na(iHighBar) ? time[bar_index-iHighBar] : na
+    iTrend:=-1
+
+if xBullBreak
+    xHighWaiting:=false
+    xProtectedLow:=xLow
+    xProtectedLowBar:=xLowBar
+    xProtectedLowTime:=not na(xLowBar) ? time[bar_index-xLowBar] : na
+    xTrend:=1
+
+if xBearBreak
+    xLowWaiting:=false
+    xProtectedHigh:=xHigh
+    xProtectedHighBar:=xHighBar
+    xProtectedHighTime:=not na(xHighBar) ? time[bar_index-xHighBar] : na
+    xTrend:=-1
+
+//================ PERSISTENT LAST EVENT — DIAGNOSTIC ONLY ================
+var string lastIEvent="NONE"
+var string lastXEvent="NONE"
+
+if iBullMSS
+    lastIEvent:="BULL MSS"
+else if iBearMSS
+    lastIEvent:="BEAR MSS"
+else if iBullCH
+    lastIEvent:="BULL CHoCH"
+else if iBearCH
+    lastIEvent:="BEAR CHoCH"
+else if iBullBOS
+    lastIEvent:="BULL BOS"
+else if iBearBOS
+    lastIEvent:="BEAR BOS"
+
+if xBullMSS
+    lastXEvent:="BULL MSS"
+else if xBearMSS
+    lastXEvent:="BEAR MSS"
+else if xBullCH
+    lastXEvent:="BULL CHoCH"
+else if xBearCH
+    lastXEvent:="BEAR CHoCH"
+else if xBullBOS
+    lastXEvent:="BULL BOS"
+else if xBearBOS
+    lastXEvent:="BEAR BOS"
+
+//=============================================================================
+// PLAIN-TEXT VISUALS
+//
+// No forced text color: this matches P01.7 and avoids invisible white text on
+// light TradingView themes. No manual 80-label queue: max_labels_count=500
+// preserves substantially more regression history.
+//=============================================================================
+
+if showSwings and not na(iPH)
+    label.new(iHighBar,iHigh,"i"+iHighClass,style=label.style_none,size=size.tiny)
+if showSwings and not na(iPL)
+    label.new(iLowBar,iLow,"i"+iLowClass,style=label.style_none,size=size.tiny)
+if showSwings and not na(xPH)
+    label.new(xHighBar,xHigh,"x"+xHighClass,style=label.style_none,size=size.tiny)
+if showSwings and not na(xPL)
+    label.new(xLowBar,xLow,"x"+xLowClass,style=label.style_none,size=size.tiny)
+
+if showStructure and iBullMSS
+    label.new(bar_index,low,"iMSS ↑",style=label.style_none,size=size.small)
+else if showStructure and iBullCH
+    label.new(bar_index,low,"iCHoCH ↑",style=label.style_none,size=size.small)
+else if showStructure and iBullBOS
+    label.new(bar_index,low,"iBOS ↑",style=label.style_none,size=size.small)
+
+if showStructure and iBearMSS
+    label.new(bar_index,high,"iMSS ↓",style=label.style_none,size=size.small)
+else if showStructure and iBearCH
+    label.new(bar_index,high,"iCHoCH ↓",style=label.style_none,size=size.small)
+else if showStructure and iBearBOS
+    label.new(bar_index,high,"iBOS ↓",style=label.style_none,size=size.small)
+
+if showStructure and xBullMSS
+    label.new(bar_index,low,"xMSS ↑",style=label.style_none,size=size.small)
+else if showStructure and xBullCH
+    label.new(bar_index,low,"xCHoCH ↑",style=label.style_none,size=size.small)
+else if showStructure and xBullBOS
+    label.new(bar_index,low,"xBOS ↑",style=label.style_none,size=size.small)
+
+if showStructure and xBearMSS
+    label.new(bar_index,high,"xMSS ↓",style=label.style_none,size=size.small)
+else if showStructure and xBearCH
+    label.new(bar_index,high,"xCHoCH ↓",style=label.style_none,size=size.small)
+else if showStructure and xBearBOS
+    label.new(bar_index,high,"xBOS ↓",style=label.style_none,size=size.small)
+
+//================ SAFE TIME-BASED ACTIVE LEVEL RENDERER ================
+var line iTH=na
+var line iTL=na
+var line xTH=na
+var line xTL=na
+var line iPHLine=na
+var line iPLLine=na
+var line xPHLine=na
+var line xPLLine=na
+
+if barstate.islast
+    if na(iTH)
+        iTH:=line.new(time,close,time,close,xloc=xloc.bar_time,extend=extend.none)
+        iTL:=line.new(time,close,time,close,xloc=xloc.bar_time,extend=extend.none)
+        xTH:=line.new(time,close,time,close,xloc=xloc.bar_time,extend=extend.none)
+        xTL:=line.new(time,close,time,close,xloc=xloc.bar_time,extend=extend.none)
+        iPHLine:=line.new(time,close,time,close,xloc=xloc.bar_time,extend=extend.none,style=line.style_dashed)
+        iPLLine:=line.new(time,close,time,close,xloc=xloc.bar_time,extend=extend.none,style=line.style_dashed)
+        xPHLine:=line.new(time,close,time,close,xloc=xloc.bar_time,extend=extend.none,style=line.style_dashed)
+        xPLLine:=line.new(time,close,time,close,xloc=xloc.bar_time,extend=extend.none,style=line.style_dashed)
+
+    color hidden=color.new(color.gray,100)
+    color visible=color.gray
+
+    if iHighWaiting and not na(iTargetHighTime)
+        line.set_xy1(iTH,iTargetHighTime,iTargetHigh)
+        line.set_xy2(iTH,time,iTargetHigh)
+        line.set_color(iTH,showLevels?visible:hidden)
+    else
+        line.set_color(iTH,hidden)
+
+    if iLowWaiting and not na(iTargetLowTime)
+        line.set_xy1(iTL,iTargetLowTime,iTargetLow)
+        line.set_xy2(iTL,time,iTargetLow)
+        line.set_color(iTL,showLevels?visible:hidden)
+    else
+        line.set_color(iTL,hidden)
+
+    if xHighWaiting and not na(xTargetHighTime)
+        line.set_xy1(xTH,xTargetHighTime,xTargetHigh)
+        line.set_xy2(xTH,time,xTargetHigh)
+        line.set_width(xTH,2)
+        line.set_color(xTH,showLevels?visible:hidden)
+    else
+        line.set_color(xTH,hidden)
+
+    if xLowWaiting and not na(xTargetLowTime)
+        line.set_xy1(xTL,xTargetLowTime,xTargetLow)
+        line.set_xy2(xTL,time,xTargetLow)
+        line.set_width(xTL,2)
+        line.set_color(xTL,showLevels?visible:hidden)
+    else
+        line.set_color(xTL,hidden)
+
+    if not na(iProtectedHigh) and not na(iProtectedHighTime)
+        line.set_xy1(iPHLine,iProtectedHighTime,iProtectedHigh)
+        line.set_xy2(iPHLine,time,iProtectedHigh)
+        line.set_color(iPHLine,showProtected?visible:hidden)
+    else
+        line.set_color(iPHLine,hidden)
+
+    if not na(iProtectedLow) and not na(iProtectedLowTime)
+        line.set_xy1(iPLLine,iProtectedLowTime,iProtectedLow)
+        line.set_xy2(iPLLine,time,iProtectedLow)
+        line.set_color(iPLLine,showProtected?visible:hidden)
+    else
+        line.set_color(iPLLine,hidden)
+
+    if not na(xProtectedHigh) and not na(xProtectedHighTime)
+        line.set_xy1(xPHLine,xProtectedHighTime,xProtectedHigh)
+        line.set_xy2(xPHLine,time,xProtectedHigh)
+        line.set_width(xPHLine,2)
+        line.set_color(xPHLine,showProtected?visible:hidden)
+    else
+        line.set_color(xPHLine,hidden)
+
+    if not na(xProtectedLow) and not na(xProtectedLowTime)
+        line.set_xy1(xPLLine,xProtectedLowTime,xProtectedLow)
+        line.set_xy2(xPLLine,time,xProtectedLow)
+        line.set_width(xPLLine,2)
+        line.set_color(xPLLine,showProtected?visible:hidden)
+    else
+        line.set_color(xPLLine,hidden)
+
+//================ DIAGNOSTICS ================
+var int iEvents=0
+var int xEvents=0
+if iBullBreak or iBearBreak
+    iEvents+=1
+if xBullBreak or xBearBreak
+    xEvents+=1
+
+var table t=table.new(position.top_right,2,14)
+if barstate.islast
+    table.clear(t,0,0,1,13)
+    if diagnostic
+        table.cell(t,0,0,"ARTHA I01.2")
+        table.cell(t,1,0,"P01.7 REGRESSION")
+        table.cell(t,0,1,"Internal trend")
+        table.cell(t,1,1,iTrend==1?"BULL":iTrend==-1?"BEAR":"NEUTRAL")
+        table.cell(t,0,2,"Last internal event")
+        table.cell(t,1,2,lastIEvent)
+        table.cell(t,0,3,"Internal swing")
+        table.cell(t,1,3,iHighClass+" / "+iLowClass)
+        table.cell(t,0,4,"Internal target H")
+        table.cell(t,1,4,iHighWaiting?str.tostring(iTargetHigh):"-")
+        table.cell(t,0,5,"Internal target L")
+        table.cell(t,1,5,iLowWaiting?str.tostring(iTargetLow):"-")
+        table.cell(t,0,6,"External trend")
+        table.cell(t,1,6,xTrend==1?"BULL":xTrend==-1?"BEAR":"NEUTRAL")
+        table.cell(t,0,7,"Last external event")
+        table.cell(t,1,7,lastXEvent)
+        table.cell(t,0,8,"External swing")
+        table.cell(t,1,8,xHighClass+" / "+xLowClass)
+        table.cell(t,0,9,"External target H")
+        table.cell(t,1,9,xHighWaiting?str.tostring(xTargetHigh):"-")
+        table.cell(t,0,10,"External target L")
+        table.cell(t,1,10,xLowWaiting?str.tostring(xTargetLow):"-")
+        table.cell(t,0,11,"Protected i H/L")
+        table.cell(t,1,11,str.tostring(iProtectedHigh)+" / "+str.tostring(iProtectedLow))
+        table.cell(t,0,12,"Protected x H/L")
+        table.cell(t,1,12,str.tostring(xProtectedHigh)+" / "+str.tostring(xProtectedLow))
+        table.cell(t,0,13,"Breaks i/x | disp")
+        table.cell(t,1,13,str.tostring(iEvents)+" / "+str.tostring(xEvents)+" | "+str.tostring(disp,"#.##"))
+
+// Structure alerts only.
+alertcondition(iBullBOS or xBullBOS,"ARTHA Bullish BOS","Confirmed bullish BOS")
+alertcondition(iBearBOS or xBearBOS,"ARTHA Bearish BOS","Confirmed bearish BOS")
+alertcondition(iBullCH or xBullCH,"ARTHA Bullish CHoCH","Confirmed bullish CHoCH")
+alertcondition(iBearCH or xBearCH,"ARTHA Bearish CHoCH","Confirmed bearish CHoCH")
+alertcondition(iBullMSS or xBullMSS,"ARTHA Bullish MSS","Confirmed bullish MSS")
+alertcondition(iBearMSS or xBearMSS,"ARTHA Bearish MSS","Confirmed bearish MSS")
