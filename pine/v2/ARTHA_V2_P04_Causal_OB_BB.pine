@@ -119,6 +119,7 @@ string G06="06 Order Block / Breaker"
 int obSearchBars=input.int(8,"Origin search bars before episode",minval=1,maxval=20,group=G06)
 bool obBodyOnly=input.bool(false,"Use candle body for OB zone",group=G06)
 bool requirePrimaryStructuralFVG=input.bool(true,"Require primary structural FVG",group=G06)
+string bbFlipMode=input.string("Close beyond boundary","BB flip confirmation",options=["Close beyond boundary","Full body beyond boundary"],group=G06)
 bool requireBreakerDisplacement=input.bool(true,"Require opposite displacement for breaker",group=G06)
 bool retireOBOnFullWickFill=input.bool(false,"Retire OB on full wick traversal",group=G06)
 bool retireBBOnFullWickFill=input.bool(true,"Retire BB on full wick traversal",group=G06)
@@ -1107,9 +1108,13 @@ if array.size(orderBlocks)>0
             float mitigationPct=100.0*overlap/zoneHeight
             z.maxMitigationPct:=math.max(z.maxMitigationPct,mitigationPct)
 
-            bool bullFailure=z.direction==1 and close<z.bottom
-            bool bearFailure=z.direction==-1 and close>z.top
-            bool breakerQualified=z.direction==1?(bullFailure and (not requireBreakerDisplacement or bearDisplacementEvent)):(bearFailure and (not requireBreakerDisplacement or bullDisplacementEvent))
+            bool bullCloseFailure=z.direction==1 and close<z.bottom
+            bool bearCloseFailure=z.direction==-1 and close>z.top
+            bool bullBodyFailure=z.direction==1 and open<z.bottom and close<z.bottom
+            bool bearBodyFailure=z.direction==-1 and open>z.top and close>z.top
+            bool bullFlipConfirmed=bbFlipMode=="Full body beyond boundary"?bullBodyFailure:bullCloseFailure
+            bool bearFlipConfirmed=bbFlipMode=="Full body beyond boundary"?bearBodyFailure:bearCloseFailure
+            bool breakerQualified=z.direction==1?(bullFlipConfirmed and (not requireBreakerDisplacement or bearDisplacementEvent)):(bearFlipConfirmed and (not requireBreakerDisplacement or bullDisplacementEvent))
             bool fullWickFill=z.direction==1?low<=z.bottom:high>=z.top
 
             if breakerQualified
