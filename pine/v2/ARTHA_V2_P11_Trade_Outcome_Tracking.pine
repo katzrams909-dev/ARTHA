@@ -2388,6 +2388,7 @@ if anySignal
     lastPlanText:=family+" "+(dir==1?"BUY":"SELL")+" · T1 "+t1Source+" · T2 "+t2Source
 
 // Update active risk plans and terminate their drawings cleanly.
+bool tradeOutcomeEvent=false
 if array.size(riskPlans)>0
     for n=0 to array.size(riskPlans)-1
         RiskPlan p=array.get(riskPlans,n)
@@ -2426,6 +2427,7 @@ if array.size(riskPlans)>0
 
         if terminal and not p.outcomeRecorded
             p.outcomeRecorded:=true
+            tradeOutcomeEvent:=true
             if p.state==2
                 completedTradeCount+=1
                 t2ReachedCount+=1
@@ -2858,7 +2860,7 @@ if barstate.islast
 // ALERTS — ENGINE EVENTS ONLY, NOT TRADE SIGNALS
 //=============================================================================
 alertcondition(newRiskPlanEvent,"ARTHA v2 Risk Plan Created","Risk and target plan created for execution signal")
-alertcondition(lastOutcomeText!="NONE" and barstate.isconfirmed,"ARTHA v2 Trade Outcome Update","A tracked ARTHA trade plan reached a terminal outcome")
+alertcondition(tradeOutcomeEvent,"ARTHA v2 Trade Outcome Update","A tracked ARTHA trade plan reached a terminal outcome")
 alertcondition(bullREVSignal,"ARTHA v2 BUY REV","Bullish REV execution signal")
 alertcondition(bearREVSignal,"ARTHA v2 SELL REV","Bearish REV execution signal")
 alertcondition(bullCONTSignal,"ARTHA v2 BUY CONT","Bullish CONT execution signal")
