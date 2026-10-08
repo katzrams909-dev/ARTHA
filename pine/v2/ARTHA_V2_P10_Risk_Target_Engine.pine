@@ -809,30 +809,8 @@ var float lastPlanRR1=na
 var float lastPlanRR2=na
 var string lastPlanText="NONE"
 
-f_activeLiquidityTargets(int dir,float entryPrice) =>
-    float first=na
-    float second=na
-    float firstDistance=na
-    float secondDistance=na
-    if array.size(liquidity)>0
-        for n=0 to array.size(liquidity)-1
-            LiquidityLevel q=array.get(liquidity,n)
-            bool candidate=q.state==0 and (dir==1?(q.buySide and q.price>entryPrice):(not q.buySide and q.price<entryPrice))
-            if candidate
-                float d=math.abs(q.price-entryPrice)
-                if na(firstDistance) or d<firstDistance
-                    second:=first
-                    secondDistance:=firstDistance
-                    first:=q.price
-                    firstDistance:=d
-                else if na(secondDistance) or d<secondDistance
-                    second:=q.price
-                    secondDistance:=d
-    [first,second]
-
-f_planStop(string family,int dir,float entryPrice,float poiTop,float poiBottom,float sweepPrice) =>
+f_planStop(string family,int dir,float entryPrice,float poiTop,float poiBottom,float sweepPrice,float protectedLevel) =>
     float buffer=atr*stopBufferATR
-    float protectedLevel=dir==1?xProtectedLow:xProtectedHigh
     float poiEdge=dir==1?poiBottom:poiTop
     float causalBase=na
     if family=="REV"
@@ -860,6 +838,27 @@ var int liquiditySweepCount=0
 var int liquidityResolutionCount=0
 var int liquidityExpiryCount=0
 var int liquiditySupersedeCount=0
+
+f_activeLiquidityTargets(int dir,float entryPrice) =>
+    float first=na
+    float second=na
+    float firstDistance=na
+    float secondDistance=na
+    if array.size(liquidity)>0
+        for n=0 to array.size(liquidity)-1
+            LiquidityLevel q=array.get(liquidity,n)
+            bool candidate=q.state==0 and (dir==1?(q.buySide and q.price>entryPrice):(not q.buySide and q.price<entryPrice))
+            if candidate
+                float d=math.abs(q.price-entryPrice)
+                if na(firstDistance) or d<firstDistance
+                    second:=first
+                    secondDistance:=firstDistance
+                    first:=q.price
+                    firstDistance:=d
+                else if na(secondDistance) or d<secondDistance
+                    second:=q.price
+                    secondDistance:=d
+    [first,second]
 
 f_near(float a,float b,float tol) =>
     not na(a) and not na(b) and math.abs(a-b)<=tol
@@ -2311,7 +2310,8 @@ if anySignal
     float poiBottom=pidx>=0?array.get(unifiedPOIs,pidx).bottom:na
 
     float entryPrice=close
-    float stopPrice=f_planStop(family,dir,entryPrice,poiTop,poiBottom,sweepPrice)
+    float protectedLevel=dir==1?xProtectedLow:xProtectedHigh
+    float stopPrice=f_planStop(family,dir,entryPrice,poiTop,poiBottom,sweepPrice,protectedLevel)
     float riskDistance=math.abs(entryPrice-stopPrice)
 
     [liqT1,liqT2]=f_activeLiquidityTargets(dir,entryPrice)
