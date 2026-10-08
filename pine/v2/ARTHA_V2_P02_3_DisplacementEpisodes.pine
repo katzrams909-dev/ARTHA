@@ -568,6 +568,8 @@ bool gapExceeded=episodeActive and not na(episodeLastDSPBar) and bar_index-episo
 bool durationExceeded=episodeActive and not na(episodeStartBar) and bar_index-episodeStartBar>=episodeMaxBars
 bool oppositeDSP=episodeActive and anyDSP and currentDSPDirection!=episodeDirection
 bool finalizeEpisode=episodeActive and (gapExceeded or durationExceeded or oppositeDSP)
+bool bullEpisodeCompleted=finalizeEpisode and episodeDirection==1
+bool bearEpisodeCompleted=finalizeEpisode and episodeDirection==-1
 
 if finalizeEpisode
     array.push(displacementEpisodes,DisplacementEpisode.new(
@@ -956,8 +958,8 @@ if barstate.islast
 //=============================================================================
 alertcondition(bullDisplacementEvent,"ARTHA v2 Bullish Displacement","Confirmed bullish displacement event")
 alertcondition(bearDisplacementEvent,"ARTHA v2 Bearish Displacement","Confirmed bearish displacement event")
-alertcondition(finalizeEpisode and episodeDirection==1,"ARTHA v2 Bullish Displacement Episode Complete","Confirmed bullish displacement episode completed")
-alertcondition(finalizeEpisode and episodeDirection==-1,"ARTHA v2 Bearish Displacement Episode Complete","Confirmed bearish displacement episode completed")
+alertcondition(bullEpisodeCompleted,"ARTHA v2 Bullish Displacement Episode Complete","Confirmed bullish displacement episode completed")
+alertcondition(bearEpisodeCompleted,"ARTHA v2 Bearish Displacement Episode Complete","Confirmed bearish displacement episode completed")
 alertcondition(iBullBOS or xBullBOS,"ARTHA v2 Bullish BOS","Confirmed bullish BOS")
 alertcondition(iBearBOS or xBearBOS,"ARTHA v2 Bearish BOS","Confirmed bearish BOS")
 alertcondition(iBullCH or xBullCH,"ARTHA v2 Bullish CHoCH","Confirmed bullish CHoCH")
