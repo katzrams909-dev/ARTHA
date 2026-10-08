@@ -710,12 +710,10 @@ f_auditCloseConfirmed(int dir,float top,float bottom,string klass) =>
     bool sweepClose=dir==1?close>=bottom:close<=top
     klass=="SWEEP_RECLAIM"?(sweepClose and standard):standard
 
-f_auditREVReason(int dir) =>
-    int st=dir==1?bullREVState:bearREVState
+f_auditREVReason(int st) =>
     st==1?"WAIT_SHIFT":st==2?"WAIT_POI":st==3?"WAIT_RETEST":st==4?"REACTION_GATE":st==5?"ELIGIBLE":"NO_ACTIVE_REV_STATE"
 
-f_auditCONTReason(int dir) =>
-    int st=dir==1?bullCONTState:bearCONTState
+f_auditCONTReason(int st) =>
     st==1?"WAIT_POI":st==2?"WAIT_RETEST":st==3?"REACTION_GATE":st==4?"ELIGIBLE":"NO_ACTIVE_CONT_STATE"
 
 f_findREVPOI(int epId,int dir) =>
@@ -2479,7 +2477,7 @@ if not na(bullAuditPOIId)
         else
             bullMissedEntryCount+=1
             bullMissedEntryEvent:=true
-            string reason=bullAuditFamily=="REV"?f_auditREVReason(1):f_auditCONTReason(1)
+            string reason=bullAuditFamily=="REV"?f_auditREVReason(bullREVState):f_auditCONTReason(bullCONTState)
             lastAuditClass:=bullAuditClass
             lastAuditFamily:=bullAuditFamily
             lastAuditReason:=reason
@@ -2512,7 +2510,7 @@ if not na(bearAuditPOIId)
         else
             bearMissedEntryCount+=1
             bearMissedEntryEvent:=true
-            string reason=bearAuditFamily=="REV"?f_auditREVReason(-1):f_auditCONTReason(-1)
+            string reason=bearAuditFamily=="REV"?f_auditREVReason(bearREVState):f_auditCONTReason(bearCONTState)
             lastAuditClass:=bearAuditClass
             lastAuditFamily:=bearAuditFamily
             lastAuditReason:=reason
