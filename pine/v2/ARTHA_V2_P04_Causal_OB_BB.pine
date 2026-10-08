@@ -1048,7 +1048,7 @@ if array.size(imbalanceZones)>0
         bool visible=active and familyVisible and ((isFVG and showFVGZones) or (isIFVG and showIFVGZones))
 
         if not na(z.bx)
-            box.set_right(z.bx,active?time:(na(z.terminalTime)?time:z.terminalTime))
+            box.set_right(z.bx,active?bar_index:(na(z.terminalBar)?bar_index:z.terminalBar))
             box.set_bgcolor(z.bx,visible?color.new(c,fvgTransparency):color.new(c,100))
             box.set_border_color(z.bx,visible?color.new(c,20):color.new(c,100))
             string kind=isIFVG?"IFVG":"FVG"
@@ -1144,7 +1144,7 @@ if array.size(orderBlocks)>0
         bool visible=active and ((isOB and showOBZones) or (isBB and showBBZones))
 
         if not na(z.bx)
-            box.set_right(z.bx,active?bar_index:(na(z.terminalBar)?bar_index:z.terminalBar))
+            box.set_right(z.bx,active?time:(na(z.terminalTime)?time:z.terminalTime))
             box.set_bgcolor(z.bx,visible?color.new(c,obTransparency):color.new(c,100))
             box.set_border_color(z.bx,visible?color.new(c,20):color.new(c,100))
             string kind=isBB?"BB":"OB"
