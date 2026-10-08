@@ -284,8 +284,11 @@ type OrderBlockZone
     float top
     float bottom
     int originBar
+    int originTime
     int bornBar
+    int bornTime
     int terminalBar
+    int terminalTime
     int episodeId
     int fvgId
     int displacementScore
@@ -459,6 +462,7 @@ f_episodeStartBar(int epId) =>
 
 f_findOBOrigin(int epId,int dir) =>
     int originBar=na
+    int originTime=na
     float zoneTop=na
     float zoneBottom=na
     int epStart=f_episodeStartBar(epId)
@@ -471,6 +475,7 @@ f_findOBOrigin(int epId,int dir) =>
                 bool opposite=dir==1?close[j]<open[j]:close[j]>open[j]
                 if opposite
                     originBar:=bar_index-j
+                    originTime:=time[j]
                     if obBodyOnly
                         zoneTop:=math.max(open[j],close[j])
                         zoneBottom:=math.min(open[j],close[j])
@@ -478,7 +483,7 @@ f_findOBOrigin(int epId,int dir) =>
                         zoneTop:=high[j]
                         zoneBottom:=low[j]
                     break
-    [originBar,zoneTop,zoneBottom]
+    [originBar,originTime,zoneTop,zoneBottom]
 
 //=============================================================================
 // LIQUIDITY HELPERS
@@ -1043,7 +1048,7 @@ if array.size(imbalanceZones)>0
         bool visible=active and familyVisible and ((isFVG and showFVGZones) or (isIFVG and showIFVGZones))
 
         if not na(z.bx)
-            box.set_right(z.bx,active?bar_index:(na(z.terminalBar)?bar_index:z.terminalBar))
+            box.set_right(z.bx,active?time:(na(z.terminalTime)?time:z.terminalTime))
             box.set_bgcolor(z.bx,visible?color.new(c,fvgTransparency):color.new(c,100))
             box.set_border_color(z.bx,visible?color.new(c,20):color.new(c,100))
             string kind=isIFVG?"IFVG":"FVG"
@@ -1069,22 +1074,22 @@ bool bullOBTrigger=requirePrimaryStructuralFVG?newBullPrimaryStructuralFVG:(bull
 bool bearOBTrigger=requirePrimaryStructuralFVG?newBearPrimaryStructuralFVG:(bearFVGEvent and bearCausal and bearStructureLinked)
 
 if bullOBTrigger and not na(newBullPrimaryEpisodeId) and not f_hasOrderBlockForEpisode(newBullPrimaryEpisodeId,1)
-    [originBar,zoneTop,zoneBottom]=f_findOBOrigin(newBullPrimaryEpisodeId,1)
-    if not na(originBar) and not na(zoneTop) and not na(zoneBottom)
+    [originBar,originTime,zoneTop,zoneBottom]=f_findOBOrigin(newBullPrimaryEpisodeId,1)
+    if not na(originBar) and not na(originTime) and not na(zoneTop) and not na(zoneBottom)
         string txt=showOBProvenance?"OB · EP"+str.tostring(newBullPrimaryEpisodeId)+" · "+newBullPrimaryKind:"OB"
-        box bx=box.new(originBar,zoneTop,bar_index,zoneBottom,xloc=xloc.bar_index,extend=extend.none,bgcolor=color.new(bullOBColor,obTransparency),border_color=color.new(bullOBColor,20),text=txt,text_color=bullOBColor,text_size=f_textSize(),text_halign=text.align_right,text_valign=text.align_center)
-        array.push(orderBlocks,OrderBlockZone.new(nextOrderBlockId,1,0,zoneTop,zoneBottom,originBar,bar_index,na,newBullPrimaryEpisodeId,newBullPrimaryFVGId,newBullPrimaryScore,newBullPrimaryScope,newBullPrimaryKind,0.0,bx))
+        box bx=box.new(originTime,zoneTop,time,zoneBottom,xloc=xloc.bar_time,extend=extend.none,bgcolor=color.new(bullOBColor,obTransparency),border_color=color.new(bullOBColor,20),text=txt,text_color=bullOBColor,text_size=f_textSize(),text_halign=text.align_right,text_valign=text.align_center)
+        array.push(orderBlocks,OrderBlockZone.new(nextOrderBlockId,1,0,zoneTop,zoneBottom,originBar,originTime,bar_index,time,na,na,newBullPrimaryEpisodeId,newBullPrimaryFVGId,newBullPrimaryScore,newBullPrimaryScope,newBullPrimaryKind,0.0,bx))
         nextOrderBlockId+=1
         bullOBCount+=1
         bullOBEvent:=true
         f_trimOrderBlocks()
 
 if bearOBTrigger and not na(newBearPrimaryEpisodeId) and not f_hasOrderBlockForEpisode(newBearPrimaryEpisodeId,-1)
-    [originBar,zoneTop,zoneBottom]=f_findOBOrigin(newBearPrimaryEpisodeId,-1)
-    if not na(originBar) and not na(zoneTop) and not na(zoneBottom)
+    [originBar,originTime,zoneTop,zoneBottom]=f_findOBOrigin(newBearPrimaryEpisodeId,-1)
+    if not na(originBar) and not na(originTime) and not na(zoneTop) and not na(zoneBottom)
         string txt=showOBProvenance?"OB · EP"+str.tostring(newBearPrimaryEpisodeId)+" · "+newBearPrimaryKind:"OB"
-        box bx=box.new(originBar,zoneTop,bar_index,zoneBottom,xloc=xloc.bar_index,extend=extend.none,bgcolor=color.new(bearOBColor,obTransparency),border_color=color.new(bearOBColor,20),text=txt,text_color=bearOBColor,text_size=f_textSize(),text_halign=text.align_right,text_valign=text.align_center)
-        array.push(orderBlocks,OrderBlockZone.new(nextOrderBlockId,-1,0,zoneTop,zoneBottom,originBar,bar_index,na,newBearPrimaryEpisodeId,newBearPrimaryFVGId,newBearPrimaryScore,newBearPrimaryScope,newBearPrimaryKind,0.0,bx))
+        box bx=box.new(originTime,zoneTop,time,zoneBottom,xloc=xloc.bar_time,extend=extend.none,bgcolor=color.new(bearOBColor,obTransparency),border_color=color.new(bearOBColor,20),text=txt,text_color=bearOBColor,text_size=f_textSize(),text_halign=text.align_right,text_valign=text.align_center)
+        array.push(orderBlocks,OrderBlockZone.new(nextOrderBlockId,-1,0,zoneTop,zoneBottom,originBar,originTime,bar_index,time,na,na,newBearPrimaryEpisodeId,newBearPrimaryFVGId,newBearPrimaryScore,newBearPrimaryScope,newBearPrimaryKind,0.0,bx))
         nextOrderBlockId+=1
         bearOBCount+=1
         bearOBEvent:=true
@@ -1118,6 +1123,7 @@ if array.size(orderBlocks)>0
             else if retireOBOnFullWickFill and fullWickFill
                 z.state:=2
                 z.terminalBar:=bar_index
+                z.terminalTime:=time
                 retiredOBBBCount+=1
 
         else if z.state==1
@@ -1127,6 +1133,7 @@ if array.size(orderBlocks)>0
             if invalidClose or (retireBBOnFullWickFill and fullTraverse)
                 z.state:=2
                 z.terminalBar:=bar_index
+                z.terminalTime:=time
                 retiredOBBBCount+=1
 
         bool active=z.state<2
