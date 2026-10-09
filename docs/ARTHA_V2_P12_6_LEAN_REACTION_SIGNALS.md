@@ -1,82 +1,98 @@
 # ARTHA v2 P12.6 — Lean Reaction Signals
 
-## Why this build exists
+## Reset point
 
-P12.5 was accidentally truncated during the CE10295 refactor. P12.6 is rebuilt from the complete P12.4 source.
+P12.6 is the new baseline built from the clean P11.6 reaction classifier and the useful P12 production behavior.
 
-The permanent audit layer is removed. Its useful execution behavior is retained as an alternate reaction-signal path.
+The patch chain after P12 is intentionally not carried forward wholesale.
+
+## What remains
+
+Core execution stack:
+
+```text
+Structure
+→ Liquidity
+→ Displacement
+→ Episodes
+→ FVG / IFVG
+→ OB / BB
+→ Unified POI
+→ REV / CONT
+→ Quality
+→ Signals
+→ Risk / Targets
+→ Outcomes
+```
 
 ## Signal paths
 
 ```text
-Normal REV / CONT
-        │
-        ├──────────────→ execution signal
-        │
-POI reaction
-        │
-        ├─ MISSED ─────→ execution signal
-        ├─ EARLY ──────→ execution signal
-        └─ RAW ────────→ ignored
+NORMAL ARTHA
+→ execution signal
+
+TRUE_MISS
+→ MISS execution signal
+
+EARLY
+→ EARLY execution signal
+
+RAW
+→ ignored
 ```
 
-## MISSED signal
+### MISS
 
-A MISSED reaction requires an already-bound ARTHA candidate POI:
+Former P11.6 TRUE_MISS events are now valid signals when the reaction confirms, the family is enabled, the setup/POI provenance is valid, and duplicate/cooldown gates pass.
 
-- REV candidate in ARMED/RETEST;
-- CONT candidate in ARMED/RETEST;
-- exact source engine + POI ID match;
-- confirmed reaction;
-- no normal signal already captured;
-- family quality threshold;
-- duplicate and cooldown checks.
+### EARLY
 
-## EARLY signal
+Former P11.6 EARLY opportunities are now valid signals when their direction-aware recent REV/CONT context is valid, the POI reaction confirms, and duplicate/cooldown gates pass.
 
-An EARLY reaction requires:
+EARLY uses its own minimum quality threshold, default 65.
 
-- a primary actionable POI;
-- recent same-direction causal context;
-- REV: recent CHoCH/MSS;
-- CONT: external trend aligned + recent displacement/BOS;
-- reacting POI has an episode ID;
-- confirmed reaction;
-- configurable minimum score (default 65);
-- duplicate and cooldown checks.
+### RAW
 
-EARLY does not require an already-armed ARTHA candidate. It is the deliberate fast-entry path.
-
-## RAW
-
-A POI reaction without candidate or recent causal context is ignored.
+RAW POI reactions produce no signal, marker, risk plan, or alert.
 
 ## Removed
 
-P12.6 removes the permanent audit/reporting subsystem:
+The lean production path removes:
 
-- MISS labels;
-- EARLY triangle markers;
-- RAW counters;
-- audit counters;
-- audit diagnostic table rows;
-- large diagnostic table/counting section;
-- research/production runtime profile;
-- engine-event alert clutter.
+- Research/Production runtime-profile switching;
+- orange missed-entry labels;
+- orange early-opportunity triangles;
+- RAW reaction display;
+- the large diagnostic table;
+- duplicate terminal outcome-label system.
 
-The normal chart modes and execution display remain.
+## Recent entry/result display
 
-## Downstream
+The useful P12 display model remains:
 
-MISSED and EARLY signals enter the same existing pipeline as normal signals:
+- newest active plan: ENTRY / SL / T1 / T2;
+- recent entry cards: ON by default;
+- keep last 4 cards by default;
+- cards update through ACTIVE → T1 HIT → T2 HIT / STOPPED / EXPIRED.
+
+Reaction-derived cards are explicitly tagged:
 
 ```text
-signal
-→ risk / targets
-→ outcome tracking
-→ persistent recent-entry history
+REV BUY · MISS
+CONT SELL · EARLY
 ```
 
-## Pine-size goal
+Normal entries have no extra source tag.
 
-Removing the diagnostic table and audit display layer materially reduces the main executable body and is intended to resolve CE10295 without truncating the indicator.
+## Risk-plan tracking
+
+Visible cards and internal tracking are separate.
+
+- visible recent entries: 4 default;
+- internally tracked risk plans: 20 default.
+
+This prevents a trade from disappearing from tracking merely because it is no longer one of the four visible entries.
+
+## Important
+
+P12.6 is a behavioral reset: MISS and EARLY are now part of the execution-signal model, not audit-only observations.
