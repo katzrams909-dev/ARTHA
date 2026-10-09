@@ -260,7 +260,9 @@ Production target filters include:
 - minimum R;
 - maximum R;
 - T1/T2 separation;
-- T2 beyond T1.
+- T2 selected only after finalized T1;
+- exhaustive search for the nearest valid T2 beyond T1;
+- guaranteed fallback T2 beyond T1.
 
 Defaults:
 
