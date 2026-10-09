@@ -8,7 +8,7 @@ Source:
 
 Frozen from:
 
-`pine/v2/ARTHA_V2_P15_Production_Consolidation.pine`
+`pine/v2/ARTHA_V2_P15_1_Target_Ordering_Hotfix.pine`
 
 Branch:
 
@@ -37,6 +37,16 @@ Branch:
 | P13 | Target Quality | Validated |
 | P14 | Signal Conflict Resolution | Validated |
 | P15 | Production Consolidation | Validated |
+| P15.1 | Target Ordering Hotfix | Compile + visual validated |
+
+## P15.1 production hotfix
+
+The production file now includes the validated P15.1 target-ordering fix:
+
+- T2 is always beyond finalized T1;
+- T2 liquidity search is exhaustive beyond finalized T1;
+- invalid nearer liquidity cannot hide a later valid T2;
+- recent-entry input wording matches active + completed card behavior.
 
 ## Current production behavior
 
