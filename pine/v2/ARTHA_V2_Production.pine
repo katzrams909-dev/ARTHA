@@ -3,9 +3,9 @@ indicator("ARTHA v2 — Production", shorttitle="ARTHA v2", overlay=true, max_li
 
 //=============================================================================
 // ARTHA v2 — PRODUCTION RELEASE BASELINE
-// Frozen from validated P15 Production Consolidation.
-// Trading logic is unchanged from P15.
-// VWAP, strategy() conversion and standalone divergence are intentionally excluded.
+// Promoted from validated P15.1 Target Ordering Hotfix.
+// P15.1 guarantees T2 ordering and exhaustive valid T2 liquidity search.
+// Signal, stop, scoring, conflict and outcome logic are unchanged.
 //=============================================================================
 
 //=============================================================================
@@ -235,8 +235,8 @@ string outcomeModel=input.string("50% T1 + BE remainder","Outcome model",options
 bool showRiskLevelTags=input.bool(true,"Show ENTRY / SL / T1 / T2 labels",group=G13)
 bool showOnlyLatestActivePlan=input.bool(true,"Draw only newest active plan",group=G13)
 bool showPlanStatusTag=input.bool(false,"Show active plan status tag",group=G13)
-bool showRecentEntryResults=input.bool(true,"Show recent completed entries",group=G13)
-int recentEntryResultCount=input.int(4,"Recent completed entries to keep",minval=1,maxval=10,group=G13)
+bool showRecentEntryResults=input.bool(true,"Show recent entries / results",group=G13)
+int recentEntryResultCount=input.int(4,"Recent entries / results to keep",minval=1,maxval=10,group=G13)
 
 //=============================================================================
 // 14 ADAPTIVE REACTION SIGNALS
@@ -1008,12 +1008,9 @@ var int liquidityResolutionCount=0
 var int liquidityExpiryCount=0
 var int liquiditySupersedeCount=0
 
-f_activeLiquidityTargets(int dir,float entryPrice,float riskDistance) =>
-    float first=na
-    float second=na
-    float firstDistance=na
-    float secondDistance=na
-    float minSep=atr*minTargetSeparationATR
+f_activeLiquidityT1(int dir,float entryPrice,float riskDistance) =>
+    float result=na
+    float bestDistance=na
     if array.size(liquidity)>0 and riskDistance>0
         for n=0 to array.size(liquidity)-1
             LiquidityLevel q=array.get(liquidity,n)
@@ -1021,23 +1018,27 @@ f_activeLiquidityTargets(int dir,float entryPrice,float riskDistance) =>
             float d=math.abs(q.price-entryPrice)
             float rr=d/riskDistance
             bool candidate=q.state==0 and q.tier<=maxTargetLiquidityTier and sideOK and rr>=minTarget1R and rr<=maxLiquidityTargetR
-            if candidate
-                if na(firstDistance) or d<firstDistance
-                    second:=first
-                    secondDistance:=firstDistance
-                    first:=q.price
-                    firstDistance:=d
-                else if (na(secondDistance) or d<secondDistance) and (na(first) or math.abs(q.price-first)>=minSep)
-                    second:=q.price
-                    secondDistance:=d
+            if candidate and (na(bestDistance) or d<bestDistance)
+                result:=q.price
+                bestDistance:=d
+    result
 
-        // T2 must be materially beyond T1 and meet its own minimum R.
-        if not na(second)
-            float secondRR=math.abs(second-entryPrice)/riskDistance
-            bool separated=na(first) or math.abs(second-first)>=minSep
-            if secondRR<minTarget2R or not separated
-                second:=na
-    [first,second]
+f_activeLiquidityT2(int dir,float entryPrice,float riskDistance,float target1) =>
+    float result=na
+    float bestDistance=na
+    float minSep=math.max(atr*minTargetSeparationATR,syminfo.mintick)
+    if array.size(liquidity)>0 and riskDistance>0 and not na(target1)
+        for n=0 to array.size(liquidity)-1
+            LiquidityLevel q=array.get(liquidity,n)
+            bool sideOK=dir==1?(q.buySide and q.price>entryPrice):(not q.buySide and q.price<entryPrice)
+            bool beyondT1=dir==1?q.price>=target1+minSep:q.price<=target1-minSep
+            float d=math.abs(q.price-entryPrice)
+            float rr=d/riskDistance
+            bool candidate=q.state==0 and q.tier<=maxTargetLiquidityTier and sideOK and beyondT1 and rr>=minTarget2R and rr<=maxLiquidityTargetR
+            if candidate and (na(bestDistance) or d<bestDistance)
+                result:=q.price
+                bestDistance:=d
+    result
 
 f_near(float a,float b,float tol) =>
     not na(a) and not na(b) and math.abs(a-b)<=tol
@@ -2786,16 +2787,20 @@ if anySignal
     float stopPrice=f_planStop(family,dir,entryPrice,poiTop,poiBottom,sweepPrice,protectedLevel)
     float riskDistance=math.abs(entryPrice-stopPrice)
 
-    [liqT1,liqT2]=f_activeLiquidityTargets(dir,entryPrice,riskDistance)
     float fallback1=dir==1?entryPrice+riskDistance*fallbackTarget1R:entryPrice-riskDistance*fallbackTarget1R
-    float fallback2=dir==1?entryPrice+riskDistance*fallbackTarget2R:entryPrice-riskDistance*fallbackTarget2R
+    float fallback2Base=dir==1?entryPrice+riskDistance*fallbackTarget2R:entryPrice-riskDistance*fallbackTarget2R
 
-    float target1=useLiquidityTargets and not na(liqT1)?liqT1:fallback1
-    float target2Candidate=useLiquidityTargets and not na(liqT2)?liqT2:fallback2
-    bool t2BeyondT1=dir==1?target2Candidate>target1:target2Candidate<target1
-    float target2=t2BeyondT1?target2Candidate:(dir==1?entryPrice+riskDistance*fallbackTarget2R:entryPrice-riskDistance*fallbackTarget2R)
-    string t1Source=useLiquidityTargets and not na(liqT1)?"LIQ":"R"
-    string t2Source=useLiquidityTargets and not na(liqT2) and t2BeyondT1?"LIQ":"R"
+    float liqT1=useLiquidityTargets?f_activeLiquidityT1(dir,entryPrice,riskDistance):na
+    float target1=not na(liqT1)?liqT1:fallback1
+    string t1Source=not na(liqT1)?"LIQ":"R"
+
+    // T2 is selected only after the actual T1 is finalized.
+    // This guarantees an exhaustive search beyond T1 and a valid directional fallback.
+    float liqT2=useLiquidityTargets?f_activeLiquidityT2(dir,entryPrice,riskDistance,target1):na
+    float minT2Separation=math.max(atr*minTargetSeparationATR,syminfo.mintick)
+    float fallback2=dir==1?math.max(fallback2Base,target1+minT2Separation):math.min(fallback2Base,target1-minT2Separation)
+    float target2=not na(liqT2)?liqT2:fallback2
+    string t2Source=not na(liqT2)?"LIQ":"R"
 
     float rr1=riskDistance>0?math.abs(target1-entryPrice)/riskDistance:na
     float rr2=riskDistance>0?math.abs(target2-entryPrice)/riskDistance:na
