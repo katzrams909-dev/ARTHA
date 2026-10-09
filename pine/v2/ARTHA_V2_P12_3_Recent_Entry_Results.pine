@@ -873,19 +873,6 @@ f_signalScoreForPlan(string family,int epId,string poiEngine,int poiId) =>
                 break
     result
 
-f_recentResultLabel(RiskPlan p) =>
-    label result=na
-    if showRecentEntryResults
-        int score=f_signalScoreForPlan(p.family,p.episodeId,p.poiEngine,p.poiId)
-        string grade=na(score)?"":f_qualityGrade(score)
-        string scoreText=na(score)?"":" · Q"+str.tostring(score)+" "+grade
-        string outcomeText=p.outcome=="T2_HIT"?"T2 HIT":p.outcome=="STOPPED"?"STOPPED":p.outcome=="EXPIRED"?"EXPIRED":p.outcome
-        string rText=na(p.realizedR)?"":" · "+(p.realizedR>0?"+":"")+str.tostring(p.realizedR,"#.00")+"R"
-        string txt=p.family+" "+(p.direction==1?"BUY":"SELL")+scoreText+"\nENTRY "+str.tostring(p.entry,format.mintick)+"\n"+outcomeText+rText
-        color bg=na(p.realizedR)?color.gray:p.realizedR>=0?bullSignalColor:bearSignalColor
-        result:=label.new(p.signalTime,p.entry,txt,xloc=xloc.bar_time,style=p.direction==1?label.style_label_up:label.style_label_down,color=color.new(bg,15),textcolor=color.white,size=size.small)
-    result
-
 type RiskPlan
     int id
     string family
@@ -917,6 +904,20 @@ type RiskPlan
     label target1Tag
     label target2Tag
     label statusTag
+
+f_recentResultLabel(RiskPlan p) =>
+    label result=na
+    if showRecentEntryResults
+        int score=f_signalScoreForPlan(p.family,p.episodeId,p.poiEngine,p.poiId)
+        string grade=na(score)?"":f_qualityGrade(score)
+        string scoreText=na(score)?"":" · Q"+str.tostring(score)+" "+grade
+        string outcomeText=p.outcome=="T2_HIT"?"T2 HIT":p.outcome=="STOPPED"?"STOPPED":p.outcome=="EXPIRED"?"EXPIRED":p.outcome
+        string rText=na(p.realizedR)?"":" · "+(p.realizedR>0?"+":"")+str.tostring(p.realizedR,"#.00")+"R"
+        string txt=p.family+" "+(p.direction==1?"BUY":"SELL")+scoreText+"\nENTRY "+str.tostring(p.entry,format.mintick)+"\n"+outcomeText+rText
+        color bg=na(p.realizedR)?color.gray:p.realizedR>=0?bullSignalColor:bearSignalColor
+        result:=label.new(p.signalTime,p.entry,txt,xloc=xloc.bar_time,style=p.direction==1?label.style_label_up:label.style_label_down,color=color.new(bg,15),textcolor=color.white,size=size.small)
+    result
+
 
 var array<RiskPlan> riskPlans=array.new<RiskPlan>()
 var int nextRiskPlanId=1
