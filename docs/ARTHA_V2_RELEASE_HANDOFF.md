@@ -2,7 +2,7 @@
 
 ## Current status
 
-ARTHA v2 is production-consolidated through P15.
+ARTHA v2 is production-consolidated through P15.1.
 
 Current production source:
 
@@ -10,7 +10,7 @@ Current production source:
 
 Frozen predecessor:
 
-`pine/v2/ARTHA_V2_P15_Production_Consolidation.pine`
+`pine/v2/ARTHA_V2_P15_1_Target_Ordering_Hotfix.pine`
 
 Active branch:
 
@@ -47,7 +47,8 @@ Structure
 - visual toggles must not alter calculations;
 - recent result cards default to 4;
 - internal risk tracking defaults to 20;
-- P13 target-quality filters remain active.
+- P13 target-quality filters remain active;
+- P15.1 guarantees T2 beyond finalized T1 and performs exhaustive valid T2 liquidity search.
 
 ## How to continue
 
@@ -82,4 +83,4 @@ Avoid adding new context engines without evidence that the current causal model 
 
 Copy this into a new chat:
 
-> Continue the ARTHA v2 TradingView indicator from the production release in the public GitHub repository `katzrams909-dev/ARTHA`, branch `artha-v2-revaluation`. Use `pine/v2/ARTHA_V2_Production.pine` as the only production baseline. P15 is validated and frozen. The architecture is Structure → Liquidity → Relative Displacement → Episodes → FVG/IFVG → Causal OB/BB → Unified POI → REV/CONT → Quality → NORMAL/MISS/EARLY → Conflict Resolution → Risk/Targets → Outcomes. Signal priority is NORMAL > MISS > EARLY; RAW reactions are ignored. P13 target-quality rules are validated. VWAP is excluded, there is no strategy() conversion, and display toggles must never affect calculations. Do not revive the P12.1–P12.5 experimental chain. Work iteratively: make one scoped change, compile in Pine v6, visually validate, then freeze only after confirmation.
+> Continue the ARTHA v2 TradingView indicator from the production release in the public GitHub repository `katzrams909-dev/ARTHA`, branch `artha-v2-revaluation`. Use `pine/v2/ARTHA_V2_Production.pine` as the only production baseline. P15.1 is compile- and visually validated and has been promoted into production. The architecture is Structure → Liquidity → Relative Displacement → Episodes → FVG/IFVG → Causal OB/BB → Unified POI → REV/CONT → Quality → NORMAL/MISS/EARLY → Conflict Resolution → Risk/Targets → Outcomes. Signal priority is NORMAL > MISS > EARLY; RAW reactions are ignored. P13 target-quality rules are validated. VWAP is excluded, there is no strategy() conversion, and display toggles must never affect calculations. Do not revive the P12.1–P12.5 experimental chain. Work iteratively: make one scoped change, compile in Pine v6, visually validate, then freeze only after confirmation.
