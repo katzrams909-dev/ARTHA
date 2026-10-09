@@ -171,3 +171,20 @@ Consolidated:
 - display/calculation separation.
 
 P15 became the production release baseline.
+
+
+## P15.1 — Target Ordering Hotfix
+
+Cross-checking found two edge cases in P13 target selection.
+
+P15.1 changed target selection to:
+
+```text
+finalize T1
+→ search all eligible liquidity for nearest valid T2 beyond T1
+→ otherwise construct fallback T2 beyond T1
+```
+
+This guarantees directional T1/T2 ordering and prevents an invalid nearer second liquidity level from hiding a later valid target.
+
+P15.1 was compile- and visually validated and promoted into `ARTHA_V2_Production.pine`.
