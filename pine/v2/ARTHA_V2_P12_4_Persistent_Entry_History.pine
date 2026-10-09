@@ -1,0 +1,3354 @@
+//@version=6
+indicator("ARTHA v2 P12.4 — Persistent Entry History", shorttitle="ARTHA v2 P12.4", overlay=true, max_lines_count=500, max_boxes_count=400, max_labels_count=500)
+
+//=============================================================================
+// ARTHA v2 — PHASE 12.4
+// Creates recent-entry cards at signal time and updates them through lifecycle.
+// Keeps only the latest N visible cards while tracking a deeper internal plan buffer.
+// Presentation only; trading logic is unchanged.
+//=============================================================================
+
+//=============================================================================
+// 01 GLOBAL / DIAGNOSTICS
+//=============================================================================
+string G01="01 Global"
+string runtimeProfile=input.string("Production","Runtime profile",options=["Production","Research"],group=G01)
+string displayMode=input.string("Execution","Display mode",options=["Execution","Analysis","Full"],group=G01)
+bool showDiagnostics=input.bool(false,"Show diagnostic panel",group=G01)
+string textSizeChoice=input.string("Small","Text size",options=["Tiny","Small","Normal"],group=G01)
+
+f_textSize() =>
+    textSizeChoice=="Tiny"?size.tiny:textSizeChoice=="Normal"?size.normal:size.small
+
+f_hidden(color c) =>
+    color.new(c,100)
+
+bool modeExecution=displayMode=="Execution"
+bool modeAnalysis=displayMode=="Analysis"
+bool modeFull=displayMode=="Full"
+
+//=============================================================================
+// 02 STRUCTURE INPUTS
+//=============================================================================
+string G02="02 Structure"
+int iLen=input.int(2,"Internal pivot strength",minval=1,maxval=20,group=G02)
+int xLen=input.int(5,"External pivot strength",minval=2,maxval=50,group=G02)
+bool requireClose=input.bool(true,"Require close through structure",group=G02)
+bool showInternalStructure=input.bool(false,"Show internal structure",group=G02)
+bool showExternalStructure=input.bool(true,"Show external structure",group=G02)
+int maxStructureEvents=input.int(100,"Maximum structure visuals",minval=20,maxval=200,group=G02)
+color bullStructureColor=input.color(color.lime,"Bull structure color",group=G02)
+color bearStructureColor=input.color(color.red,"Bear structure color",group=G02)
+
+//=============================================================================
+// 03 LIQUIDITY INPUTS
+//=============================================================================
+string G03="03 Liquidity"
+float eqTolATR=input.float(0.10,"Swing clustering tolerance / ATR",minval=0.01,step=0.01,group=G03)
+bool usePD=input.bool(true,"Previous day H/L",group=G03)
+bool usePW=input.bool(true,"Previous week H/L",group=G03)
+bool usePM=input.bool(true,"Previous month H/L",group=G03)
+bool useExternalSwingLiquidity=input.bool(true,"External swing liquidity",group=G03)
+bool useInternalSwingLiquidity=input.bool(true,"Internal swing liquidity",group=G03)
+bool showTier1=input.bool(true,"Show Tier 1 liquidity",group=G03)
+bool showTier2=input.bool(true,"Show Tier 2 liquidity",group=G03)
+bool showTier3=input.bool(true,"Show Tier 3 liquidity",group=G03)
+bool showTier4=input.bool(false,"Show Tier 4 liquidity",group=G03)
+bool showLiquidityLabels=input.bool(true,"Show liquidity labels",group=G03)
+bool showTerminalLiquidity=input.bool(false,"Keep swept/resolved liquidity visible",group=G03)
+int internalSwingMaxAge=input.int(250,"Internal swing max age (bars)",minval=20,maxval=5000,group=G03)
+int externalSwingMaxAge=input.int(1000,"External swing max age (bars)",minval=50,maxval=10000,group=G03)
+int maxLiquidity=input.int(180,"Maximum liquidity records",minval=40,maxval=300,group=G03)
+color tier1Color=input.color(color.orange,"Tier 1 color",group=G03)
+color tier2Color=input.color(color.yellow,"Tier 2 color",group=G03)
+color tier3Color=input.color(color.aqua,"Tier 3 color",group=G03)
+color tier4Color=input.color(color.gray,"Tier 4 color",group=G03)
+color terminalColor=input.color(color.gray,"Terminal liquidity color",group=G03)
+
+//=============================================================================
+// 04 DISPLACEMENT INPUTS
+//=============================================================================
+string G04="04 Displacement"
+string displacementMode=input.string("Balanced","Qualification mode",options=["Body only","Balanced","Strict"],group=G04)
+float minDispBodyATR=input.float(0.60,"Minimum body / ATR",minval=0.0,step=0.05,group=G04)
+float minDispRangeATR=input.float(0.90,"Minimum range / ATR",minval=0.0,step=0.05,group=G04)
+float minDispBodyPct=input.float(0.55,"Minimum body / candle range",minval=0.0,maxval=1.0,step=0.05,group=G04)
+float minDispCloseLoc=input.float(0.70,"Minimum directional close location",minval=0.50,maxval=1.0,step=0.05,group=G04)
+int minDisplacementScore=input.int(60,"Minimum displacement quality score",minval=0,maxval=100,group=G04)
+bool useFollowThrough=input.bool(true,"Reward consecutive directional expansion",group=G04)
+bool useVolumeContext=input.bool(false,"Use volume as quality context",group=G04)
+int volumeLookback=input.int(20,"Volume average length",minval=5,maxval=200,group=G04)
+float volumeExpansionRatio=input.float(1.20,"Volume expansion ratio",minval=0.1,step=0.05,group=G04)
+int relativeLookback=input.int(20,"Relative expansion lookback",minval=5,maxval=100,group=G04)
+float minBodyVsAvg=input.float(1.25,"Minimum body vs recent average",minval=0.5,step=0.05,group=G04)
+float minRangeVsAvg=input.float(1.10,"Minimum range vs recent average",minval=0.5,step=0.05,group=G04)
+bool requirePriorRangeClose=input.bool(true,"Require close beyond prior candle range",group=G04)
+int episodeGapBars=input.int(1,"Episode allowed gap bars",minval=0,maxval=5,group=G04)
+int episodeMaxBars=input.int(8,"Episode maximum duration",minval=1,maxval=30,group=G04)
+bool showEpisodeMarkers=input.bool(false,"Show completed episode markers",group=G04)
+bool showDisplacementMarkers=input.bool(false,"Show qualified displacement markers",group=G04)
+int maxDisplacementMarkers=input.int(80,"Maximum displacement markers",minval=10,maxval=200,group=G04)
+color bullDisplacementColor=input.color(color.aqua,"Bull displacement color",group=G04)
+
+color bearDisplacementColor=input.color(color.fuchsia,"Bear displacement color",group=G04)
+
+//=============================================================================
+// 05 FVG / IFVG + POI PROVENANCE
+//=============================================================================
+string G05="05 FVG / IFVG"
+string fvgCreationMode=input.string("Displacement-linked","FVG creation mode",options=["All","Displacement-linked","Structural"],group=G05)
+float minFVGATR=input.float(0.10,"Minimum FVG size / ATR",minval=0.0,step=0.05,group=G05)
+int fvgProvenanceWindow=input.int(2,"Bars allowed after episode DSP",minval=0,maxval=5,group=G05)
+string ifvgFlipMode=input.string("Close beyond boundary","IFVG flip confirmation",options=["Close beyond boundary","Full body beyond boundary"],group=G05)
+bool retireFVGOnFullWickFill=input.bool(true,"Retire FVG on full wick traversal",group=G05)
+bool retireIFVGOnFullWickFill=input.bool(true,"Retire IFVG on full wick traversal",group=G05)
+int maxImbalanceZones=input.int(40,"Maximum tracked imbalance zones",minval=10,maxval=100,group=G05)
+bool showFVGZones=input.bool(true,"Show FVG zones",group=G05)
+bool showIFVGZones=input.bool(true,"Show IFVG zones",group=G05)
+bool showPOIProvenance=input.bool(false,"Show provenance in zone labels",group=G05)
+bool showSecondaryFVGs=input.bool(false,"Show secondary FVGs",group=G05)
+color bullFVGColor=input.color(color.teal,"Bull FVG color",group=G05)
+color bearFVGColor=input.color(color.maroon,"Bear FVG color",group=G05)
+color bullIFVGColor=input.color(color.aqua,"Bull IFVG color",group=G05)
+color bearIFVGColor=input.color(color.fuchsia,"Bear IFVG color",group=G05)
+int fvgTransparency=input.int(88,"FVG/IFVG transparency",minval=0,maxval=100,group=G05)
+
+//=============================================================================
+// 06 ORDER BLOCK / BREAKER BLOCK
+//=============================================================================
+string G06="06 Order Block / Breaker"
+int obSearchBars=input.int(8,"Origin search bars before episode",minval=1,maxval=20,group=G06)
+bool obBodyOnly=input.bool(false,"Use candle body for OB zone",group=G06)
+bool requirePrimaryStructuralFVG=input.bool(true,"Require primary structural FVG",group=G06)
+string bbFlipMode=input.string("Close beyond boundary","BB flip confirmation",options=["Close beyond boundary","Full body beyond boundary"],group=G06)
+bool requireBreakerDisplacement=input.bool(true,"Require opposite displacement for breaker",group=G06)
+bool retireOBOnFullWickFill=input.bool(false,"Retire OB on full wick traversal",group=G06)
+bool retireBBOnFullWickFill=input.bool(true,"Retire BB on full wick traversal",group=G06)
+int maxOrderBlocks=input.int(30,"Maximum tracked OB/BB zones",minval=5,maxval=80,group=G06)
+bool showOBZones=input.bool(true,"Show OB zones",group=G06)
+bool showBBZones=input.bool(true,"Show Breaker zones",group=G06)
+bool showOBProvenance=input.bool(false,"Show OB provenance in box text",group=G06)
+color bullOBColor=input.color(color.green,"Bull OB color",group=G06)
+color bearOBColor=input.color(color.red,"Bear OB color",group=G06)
+color bullBBColor=input.color(color.aqua,"Bull Breaker color",group=G06)
+color bearBBColor=input.color(color.fuchsia,"Bear Breaker color",group=G06)
+int obTransparency=input.int(88,"OB/BB transparency",minval=0,maxval=100,group=G06)
+
+//=============================================================================
+// 07 UNIFIED POI REGISTRY
+//=============================================================================
+string G07="07 Unified POI"
+bool poiIncludeSecondaryFVG=input.bool(false,"Include secondary FVG family members",group=G07)
+bool poiIncludeFVG=input.bool(true,"Include FVG",group=G07)
+bool poiIncludeIFVG=input.bool(true,"Include IFVG",group=G07)
+bool poiIncludeOB=input.bool(true,"Include OB",group=G07)
+bool poiIncludeBB=input.bool(true,"Include BB",group=G07)
+bool showPOIDiagnostics=input.bool(false,"Show unified POI diagnostics",group=G07)
+
+//=============================================================================
+// 08 REVERSAL SETUP ENGINE
+//=============================================================================
+string G08="08 Reversal Setup"
+int revSweepToShiftBars=input.int(12,"Max bars: sweep to structural shift",minval=1,maxval=100,group=G08)
+int revShiftToPOIBars=input.int(8,"Max bars: shift to POI",minval=0,maxval=50,group=G08)
+int revPOIToRetestBars=input.int(30,"Max bars: POI to retest",minval=1,maxval=200,group=G08)
+string revShiftScope=input.string("Any","Required shift scope",options=["Any","External"],group=G08)
+string revPOIPreference=input.string("Nearest","POI preference",options=["Nearest","OB/BB first","FVG/IFVG first"],group=G08)
+string revReactionMode=input.string("Midpoint reclaim","Reaction confirmation",options=["Directional close","Midpoint reclaim"],group=G08)
+bool revInvalidateOppositeBreak=input.bool(true,"Invalidate on opposite structure break",group=G08)
+bool showREVEligibilityMarkers=input.bool(true,"Show REV eligibility markers",group=G08)
+int maxREVMarkers=input.int(40,"Maximum REV markers",minval=10,maxval=100,group=G08)
+color bullREVColor=input.color(color.lime,"Bull REV color",group=G08)
+color bearREVColor=input.color(color.red,"Bear REV color",group=G08)
+
+//=============================================================================
+// 09 CONTINUATION SETUP ENGINE
+//=============================================================================
+string G09="09 Continuation Setup"
+string contTrendScope=input.string("External","Established trend scope",options=["External","Internal + External"],group=G09)
+bool contRequireBOS=input.bool(true,"Require same-direction BOS on expansion",group=G09)
+string contBOSScope=input.string("Any","Required BOS scope",options=["Any","External"],group=G09)
+int contImpulseToPOIBars=input.int(8,"Max bars: impulse to POI",minval=0,maxval=50,group=G09)
+int contPOIToRetestBars=input.int(30,"Max bars: POI to pullback",minval=1,maxval=200,group=G09)
+string contPOIPreference=input.string("Nearest","POI preference",options=["Nearest","OB/BB first","FVG/IFVG first"],group=G09)
+string contReactionMode=input.string("Midpoint reclaim","Reaction confirmation",options=["Directional close","Midpoint reclaim"],group=G09)
+bool contInvalidateOppositeShift=input.bool(true,"Invalidate on opposite CHoCH/MSS",group=G09)
+bool showCONTEligibilityMarkers=input.bool(true,"Show CONT eligibility markers",group=G09)
+int maxCONTMarkers=input.int(40,"Maximum CONT markers",minval=10,maxval=100,group=G09)
+color bullCONTColor=input.color(color.aqua,"Bull CONT color",group=G09)
+color bearCONTColor=input.color(color.fuchsia,"Bear CONT color",group=G09)
+
+//=============================================================================
+// 10 SETUP QUALITY
+//=============================================================================
+string G10="10 Setup Quality"
+bool showQualityInMarkers=input.bool(true,"Show quality score in eligibility markers",group=G10)
+bool showQualityDiagnostics=input.bool(false,"Show quality diagnostics",group=G10)
+int qualityGradeA=input.int(85,"Grade A threshold",minval=0,maxval=100,group=G10)
+int qualityGradeB=input.int(75,"Grade B threshold",minval=0,maxval=100,group=G10)
+int qualityGradeC=input.int(65,"Grade C threshold",minval=0,maxval=100,group=G10)
+
+//=============================================================================
+// 11 SIGNAL ENGINE
+//=============================================================================
+string G11="11 Signal Engine"
+bool enableREVSignals=input.bool(true,"Enable REV signals",group=G11)
+bool enableCONTSignals=input.bool(true,"Enable CONT signals",group=G11)
+int minREVSignalScore=input.int(75,"Minimum REV signal quality",minval=0,maxval=100,group=G11)
+int minCONTSignalScore=input.int(75,"Minimum CONT signal quality",minval=0,maxval=100,group=G11)
+int signalCooldownBars=input.int(3,"Signal cooldown bars",minval=0,maxval=100,group=G11)
+bool oneSignalPerEpisodePOI=input.bool(true,"One signal per family + episode + POI",group=G11)
+bool showSignalMarkers=input.bool(true,"Show execution signal markers",group=G11)
+bool showCompactExecutionEntries=input.bool(false,"Show compact entries in Execution mode",group=G11)
+int maxSignalMarkers=input.int(50,"Maximum signal markers",minval=10,maxval=150,group=G11)
+color bullSignalColor=input.color(color.lime,"Bull signal color",group=G11)
+color bearSignalColor=input.color(color.red,"Bear signal color",group=G11)
+
+//=============================================================================
+// 12 RISK & TARGET ENGINE
+//=============================================================================
+string G12="12 Risk & Targets"
+string riskStopMode=input.string("Causal","Stop model",options=["Causal","POI edge","Protected swing"],group=G12)
+float stopBufferATR=input.float(0.10,"Stop buffer / ATR",minval=0.0,step=0.05,group=G12)
+bool useLiquidityTargets=input.bool(true,"Use active opposing liquidity for targets",group=G12)
+float fallbackTarget1R=input.float(1.50,"Fallback Target 1 / R",minval=0.25,step=0.25,group=G12)
+float fallbackTarget2R=input.float(2.50,"Fallback Target 2 / R",minval=0.50,step=0.25,group=G12)
+bool showRiskPlans=input.bool(true,"Show entry / stop / targets",group=G12)
+bool showTerminalRiskPlans=input.bool(false,"Keep completed/failed plans visible",group=G12)
+int riskPlanMaxAgeBars=input.int(80,"Maximum active plan age (bars)",minval=5,maxval=1000,group=G12)
+int maxRiskPlans=input.int(20,"Maximum internally tracked risk plans",minval=10,maxval=50,group=G12)
+color entryPlanColor=input.color(color.gray,"Entry line color",group=G12)
+color stopPlanColor=input.color(color.red,"Stop line color",group=G12)
+color targetPlanColor=input.color(color.lime,"Target line color",group=G12)
+
+//=============================================================================
+// 13 TRADE MANAGEMENT / OUTCOMES
+//=============================================================================
+string G13="13 Trade Management"
+string outcomeModel=input.string("50% T1 + BE remainder","Outcome model",options=["No partial","50% T1 + BE remainder"],group=G13)
+bool showOutcomeDiagnostics=input.bool(false,"Show outcome diagnostics",group=G13)
+bool showRiskLevelTags=input.bool(true,"Show ENTRY / SL / T1 / T2 labels",group=G13)
+bool showOnlyLatestActivePlan=input.bool(true,"Draw only newest active plan",group=G13)
+bool showPlanStatusTag=input.bool(false,"Show active plan status tag",group=G13)
+bool showOutcomeLabels=input.bool(false,"Show terminal outcome labels",group=G13)
+bool showRecentEntryResults=input.bool(true,"Show recent completed entries",group=G13)
+int recentEntryResultCount=input.int(4,"Recent completed entries to keep",minval=1,maxval=10,group=G13)
+int maxOutcomeLabels=input.int(30,"Maximum outcome labels",minval=5,maxval=100,group=G13)
+
+//=============================================================================
+// 14 MISSED ENTRY / PLUTUS REACTION AUDIT
+//=============================================================================
+string G14="14 Missed Entry Audit"
+bool enableReactionAudit=input.bool(false,"Enable PLUTUS-style reaction audit",group=G14)
+int auditConfirmBars=input.int(3,"Reaction confirmation window (bars)",minval=1,maxval=3,group=G14)
+bool auditAllowSameBar=input.bool(true,"Allow touch-bar confirmation",group=G14)
+string auditConfirmationMode=input.string("Directional Close","Close confirmation",options=["Directional Close","Midpoint Reclaim","Any Valid Close"],group=G14)
+float auditMinCloseLocation=input.float(0.55,"Minimum directional close location",minval=0.50,maxval=1.0,step=0.05,group=G14)
+float auditMaxSweepBeyondATR=input.float(0.35,"Maximum sweep beyond POI / ATR",minval=0.0,maxval=2.0,step=0.05,group=G14)
+bool auditPrimaryOnly=input.bool(true,"Audit primary POIs only",group=G14)
+bool showMissedEntryMarkers=input.bool(false,"Show true missed-entry labels",group=G14)
+bool showEarlyOpportunityMarkers=input.bool(false,"Show early-opportunity markers",group=G14)
+int auditContextBars=input.int(8,"Recent causal context window (bars)",minval=1,maxval=30,group=G14)
+int maxMissedEntryMarkers=input.int(30,"Maximum audit markers",minval=5,maxval=100,group=G14)
+color missedEntryColor=input.color(color.orange,"Missed-entry marker color",group=G14)
+
+bool researchMode=runtimeProfile=="Research"
+bool auditEnabled=researchMode and enableReactionAudit
+
+//=============================================================================
+// SHARED MEASUREMENTS
+//=============================================================================
+float atr=ta.atr(14)
+float candleBody=math.abs(close-open)
+float candleRange=math.max(high-low,syminfo.mintick)
+float displacementBodyATR=atr>0?candleBody/atr:0.0
+float displacementRangeATR=atr>0?candleRange/atr:0.0
+float displacementBodyPct=candleBody/candleRange
+float bullCloseLocation=(close-low)/candleRange
+float bearCloseLocation=(high-close)/candleRange
+float liquidityTolerance=atr*eqTolATR
+
+float recentAvgBody=ta.sma(candleBody[1],relativeLookback)
+float recentAvgRange=ta.sma(candleRange[1],relativeLookback)
+float bodyVsAvg=not na(recentAvgBody) and recentAvgBody>0?candleBody/recentAvgBody:na
+float rangeVsAvg=not na(recentAvgRange) and recentAvgRange>0?candleRange/recentAvgRange:na
+
+bool bullDirectional=close>open
+bool bearDirectional=close<open
+bool bullPriorRangeClose=close>high[1]
+bool bearPriorRangeClose=close<low[1]
+bool bullFollowThrough=bullDirectional and close[1]>open[1] and bullPriorRangeClose
+bool bearFollowThrough=bearDirectional and close[1]<open[1] and bearPriorRangeClose
+
+float avgVolume=ta.sma(volume,volumeLookback)
+float volumeRatio=not na(avgVolume) and avgVolume>0?volume/avgVolume:na
+bool volumeExpanded=not na(volumeRatio) and volumeRatio>=volumeExpansionRatio
+
+// Score curve deliberately does NOT award full points at the minimum threshold.
+// At the minimum threshold a component earns 50% of its points; it reaches
+// full points only at a materially stronger "excellent" target.
+f_rampScore(float value,float floorValue,float targetValue,int points) =>
+    if targetValue<=floorValue
+        value>=floorValue?points:0
+    else if value<floorValue
+        0
+    else
+        float progress=math.min((value-floorValue)/(targetValue-floorValue),1.0)
+        int(math.round(points*(0.50+0.50*progress)))
+
+float bodyTarget=math.max(minDispBodyATR*1.75,minDispBodyATR+0.40)
+float rangeTarget=math.max(minDispRangeATR*1.60,minDispRangeATR+0.50)
+float bodyPctTarget=math.min(0.90,minDispBodyPct+0.25)
+float closeLocTarget=math.min(0.98,minDispCloseLoc+0.20)
+float bodyRelTarget=minBodyVsAvg+0.75
+float rangeRelTarget=minRangeVsAvg+0.60
+
+f_displacementScore(bool bullish) =>
+    int score=0
+    float closeLoc=bullish?bullCloseLocation:bearCloseLocation
+    score+=f_rampScore(displacementBodyATR,minDispBodyATR,bodyTarget,25)
+    score+=f_rampScore(displacementRangeATR,minDispRangeATR,rangeTarget,15)
+    score+=f_rampScore(displacementBodyPct,minDispBodyPct,bodyPctTarget,15)
+    score+=f_rampScore(closeLoc,minDispCloseLoc,closeLocTarget,15)
+    score+=na(bodyVsAvg)?0:f_rampScore(bodyVsAvg,minBodyVsAvg,bodyRelTarget,15)
+    score+=na(rangeVsAvg)?0:f_rampScore(rangeVsAvg,minRangeVsAvg,rangeRelTarget,10)
+    bool follow=bullish?bullFollowThrough:bearFollowThrough
+    if useFollowThrough and follow
+        score+=5
+    if useVolumeContext and volumeExpanded
+        score+=5
+    math.min(score,100)
+
+int bullDisplacementScore=bullDirectional?f_displacementScore(true):0
+int bearDisplacementScore=bearDirectional?f_displacementScore(false):0
+
+f_displacementQualified(bool bullish) =>
+    bool directional=bullish?bullDirectional:bearDirectional
+    float closeLoc=bullish?bullCloseLocation:bearCloseLocation
+    int score=bullish?bullDisplacementScore:bearDisplacementScore
+
+    bool bodyOK=displacementBodyATR>=minDispBodyATR
+    bool balancedRangeOK=displacementRangeATR>=minDispRangeATR*0.85
+    bool rangeOK=displacementRangeATR>=minDispRangeATR
+    bool efficiencyOK=displacementBodyPct>=minDispBodyPct
+    bool closeOK=closeLoc>=minDispCloseLoc
+    bool bodyRelativeOK=not na(bodyVsAvg) and bodyVsAvg>=minBodyVsAvg
+    bool rangeRelativeOK=not na(rangeVsAvg) and rangeVsAvg>=minRangeVsAvg
+    bool priorRangeOK=not requirePriorRangeClose or (bullish?bullPriorRangeClose:bearPriorRangeClose)
+
+    bool strictBody=displacementBodyATR>=minDispBodyATR*1.20
+    bool strictEfficiency=displacementBodyPct>=math.min(0.95,minDispBodyPct+0.05)
+    bool strictClose=closeLoc>=math.min(0.99,minDispCloseLoc+0.05)
+    bool strictBodyRelative=not na(bodyVsAvg) and bodyVsAvg>=minBodyVsAvg+0.15
+    bool strictRangeRelative=not na(rangeVsAvg) and rangeVsAvg>=minRangeVsAvg+0.15
+    int strictScoreFloor=math.max(minDisplacementScore,75)
+
+    displacementMode=="Body only"?directional and bodyOK:
+         displacementMode=="Strict"?directional and strictBody and rangeOK and strictEfficiency and strictClose and strictBodyRelative and strictRangeRelative and priorRangeOK and score>=strictScoreFloor:
+         directional and bodyOK and balancedRangeOK and efficiencyOK and closeOK and bodyRelativeOK and rangeRelativeOK and priorRangeOK and score>=minDisplacementScore
+
+//=============================================================================
+// TYPES
+//=============================================================================
+type DisplacementEvent
+    int id
+    int direction          // +1 bull, -1 bear
+    int bar
+    int score
+    float bodyATR
+    float rangeATR
+    float bodyPct
+    float closeLocation
+    bool followThrough
+    bool volumeExpansion
+    bool structureBreak
+    string structureScope
+    string structureKind
+
+type DisplacementEpisode
+    int id
+    int direction          // +1 bull, -1 bear
+    int startBar
+    int endBar
+    int peakBar
+    int peakScore
+    int eventCount
+    float highPrice
+    float lowPrice
+    float totalBodyATR
+    bool structureBreak
+    string structureScope
+    string structureKind
+
+type ImbalanceZone
+    int id
+    int direction          // original FVG direction: +1 bull, -1 bear
+    int state              // 0 ACTIVE FVG, 1 ACTIVE IFVG, 2 RETIRED
+    float top
+    float bottom
+    int bornBar
+    int terminalBar
+    int episodeId
+    int displacementScore
+    bool structureLinked
+    string structureScope
+    string structureKind
+    string qualityClass    // ORDINARY | DISPLACEMENT | STRUCTURAL
+    bool primary
+    int episodePeakBar
+    float birthGapATR
+    float maxMitigationPct
+    box bx
+
+type OrderBlockZone
+    int id
+    int direction          // original OB direction: +1 bull, -1 bear
+    int state              // 0 ACTIVE OB, 1 ACTIVE BB, 2 RETIRED
+    float top
+    float bottom
+    int originBar
+    int originTime
+    int bornBar
+    int bornTime
+    int terminalBar
+    int terminalTime
+    int episodeId
+    int fvgId
+    int displacementScore
+    string structureScope
+    string structureKind
+    float maxMitigationPct
+    box bx
+
+type UnifiedPOI
+    string sourceEngine      // IMBALANCE | ORDERBLOCK
+    int sourceId             // stable native source ID
+    string poiType           // FVG | IFVG | OB | BB
+    int direction            // current actionable direction
+    float top
+    float bottom
+    int bornBar
+    int episodeId
+    int parentFVGId
+    bool primary
+    int displacementScore
+    bool structureLinked
+    string structureScope
+    string structureKind
+    float mitigationPct
+
+type LiquidityLevel
+    int id
+    float price
+    bool buySide
+    int tier
+    int state              // 0 ACTIVE, 1 SWEPT, 2 RESOLVED, 3 EXPIRED, 4 SUPERSEDED
+    int createdBar
+    int terminalBar
+    int expiryBar
+    int startTime
+    int endTime
+    string sourceType
+    string sourceName
+    int originSwingBar
+    int clusterCount
+    line ln
+    label lb
+
+
+//=============================================================================
+// DISPLACEMENT STATE
+//=============================================================================
+var array<DisplacementEvent> displacementEvents=array.new<DisplacementEvent>()
+var int nextDisplacementId=1
+var int bullDisplacementCount=0
+var int bearDisplacementCount=0
+var int lastBullDisplacementBar=na
+var int lastBearDisplacementBar=na
+var int lastBullDisplacementScore=na
+var int lastBearDisplacementScore=na
+var label[] displacementLabels=array.new_label()
+var label[] episodeLabels=array.new_label()
+
+// Episode registry and active episode state.
+var array<DisplacementEpisode> displacementEpisodes=array.new<DisplacementEpisode>()
+var int nextEpisodeId=1
+var bool episodeActive=false
+var int episodeId=na
+var int episodeDirection=0
+var int episodeStartBar=na
+var int episodeLastDSPBar=na
+var int episodePeakBar=na
+var int episodePeakScore=na
+var int episodeEventCount=0
+var float episodeHigh=na
+var float episodeLow=na
+var float episodeTotalBodyATR=0.0
+var bool episodeStructureBreak=false
+var string episodeStructureScope="NONE"
+var string episodeStructureKind="NONE"
+
+var int completedEpisodeCount=0
+var int bullEpisodeCount=0
+var int bearEpisodeCount=0
+var int lastCompletedEpisodeDirection=0
+var int lastCompletedEpisodePeakScore=na
+var int lastCompletedEpisodeBars=na
+
+bool bullDisplacementEvent=barstate.isconfirmed and f_displacementQualified(true)
+bool bearDisplacementEvent=barstate.isconfirmed and f_displacementQualified(false)
+
+// FVG/IFVG registry. Lifecycle logic executes after episode aggregation so
+// each new imbalance can capture the most relevant active/completed episode.
+var array<ImbalanceZone> imbalanceZones=array.new<ImbalanceZone>()
+var int nextImbalanceId=1
+var int bullFVGCount=0
+var int bearFVGCount=0
+var int bullIFVGCount=0
+var int bearIFVGCount=0
+var int retiredImbalanceCount=0
+var int structuralFVGCount=0
+var int displacementFVGCount=0
+var int ordinaryFVGCount=0
+var int primaryFVGCount=0
+var int secondaryFVGCount=0
+
+f_episodePeakBar(int epId) =>
+    int peak=na
+    if episodeActive and episodeId==epId
+        peak:=episodePeakBar
+    else if array.size(displacementEpisodes)>0
+        for n=array.size(displacementEpisodes)-1 to 0
+            DisplacementEpisode ep=array.get(displacementEpisodes,n)
+            if ep.id==epId
+                peak:=ep.peakBar
+                break
+    peak
+
+f_primaryCandidateBetter(int newBornBar,float newGapATR,int oldBornBar,float oldGapATR,int peakBar) =>
+    int newDistance=na(peakBar)?999999:math.abs(newBornBar-peakBar)
+    int oldDistance=na(peakBar)?999999:math.abs(oldBornBar-peakBar)
+    newDistance<oldDistance or (newDistance==oldDistance and newGapATR>oldGapATR)
+
+f_assignPrimaryForEpisode(int newIndex,int epId,int dir) =>
+    bool newPrimary=true
+    if not na(epId) and array.size(imbalanceZones)>0
+        ImbalanceZone newZone=array.get(imbalanceZones,newIndex)
+        for n=0 to array.size(imbalanceZones)-1
+            if n!=newIndex
+                ImbalanceZone old=array.get(imbalanceZones,n)
+                if old.episodeId==epId and old.direction==dir and old.primary
+                    bool replace=f_primaryCandidateBetter(newZone.bornBar,newZone.birthGapATR,old.bornBar,old.birthGapATR,newZone.episodePeakBar)
+                    if replace
+                        old.primary:=false
+                        array.set(imbalanceZones,n,old)
+                    else
+                        newPrimary:=false
+                    break
+        newZone.primary:=newPrimary
+        array.set(imbalanceZones,newIndex,newZone)
+    newPrimary
+
+f_deleteImbalance(ImbalanceZone z) =>
+    if not na(z.bx)
+        box.delete(z.bx)
+
+f_trimImbalances() =>
+    while array.size(imbalanceZones)>maxImbalanceZones
+        ImbalanceZone old=array.shift(imbalanceZones)
+        f_deleteImbalance(old)
+
+//=============================================================================
+// ORDER BLOCK / BREAKER STATE + HELPERS
+//=============================================================================
+var array<OrderBlockZone> orderBlocks=array.new<OrderBlockZone>()
+var int nextOrderBlockId=1
+var int bullOBCount=0
+var int bearOBCount=0
+var int bullBBCount=0
+var int bearBBCount=0
+var int retiredOBBBCount=0
+
+f_deleteOrderBlock(OrderBlockZone z) =>
+    if not na(z.bx)
+        box.delete(z.bx)
+
+f_trimOrderBlocks() =>
+    while array.size(orderBlocks)>maxOrderBlocks
+        OrderBlockZone old=array.shift(orderBlocks)
+        f_deleteOrderBlock(old)
+
+f_hasOrderBlockForEpisode(int epId,int dir) =>
+    bool found=false
+    if not na(epId) and array.size(orderBlocks)>0
+        for n=0 to array.size(orderBlocks)-1
+            OrderBlockZone z=array.get(orderBlocks,n)
+            if z.episodeId==epId and z.direction==dir
+                found:=true
+                break
+    found
+
+f_episodeStartBar(int epId) =>
+    int start=na
+    if episodeActive and episodeId==epId
+        start:=episodeStartBar
+    else if array.size(displacementEpisodes)>0
+        for n=array.size(displacementEpisodes)-1 to 0
+            DisplacementEpisode ep=array.get(displacementEpisodes,n)
+            if ep.id==epId
+                start:=ep.startBar
+                break
+    start
+
+f_findOBOrigin(int epId,int dir) =>
+    int originBar=na
+    int originTime=na
+    float zoneTop=na
+    float zoneBottom=na
+    int epStart=f_episodeStartBar(epId)
+    if not na(epStart)
+        int startOffset=bar_index-epStart
+        int firstOffset=startOffset+1
+        int lastOffset=startOffset+obSearchBars
+        for j=firstOffset to lastOffset
+            if j>=1 and j<=bar_index
+                bool opposite=dir==1?close[j]<open[j]:close[j]>open[j]
+                if opposite
+                    originBar:=bar_index-j
+                    originTime:=time[j]
+                    if obBodyOnly
+                        zoneTop:=math.max(open[j],close[j])
+                        zoneBottom:=math.min(open[j],close[j])
+                    else
+                        zoneTop:=high[j]
+                        zoneBottom:=low[j]
+                    break
+    [originBar,originTime,zoneTop,zoneBottom]
+
+//=============================================================================
+// UNIFIED POI REGISTRY
+// Rebuilt from native source registries each bar. Native IDs remain stable.
+//=============================================================================
+var array<UnifiedPOI> unifiedPOIs=array.new<UnifiedPOI>()
+
+f_rebuildUnifiedPOIs() =>
+    array.clear(unifiedPOIs)
+
+    if array.size(imbalanceZones)>0
+        for n=0 to array.size(imbalanceZones)-1
+            ImbalanceZone z=array.get(imbalanceZones,n)
+            if z.state<2
+                bool isFVG=z.state==0
+                bool currentBull=isFVG?z.direction==1:z.direction==-1
+                int currentDir=currentBull?1:-1
+                string currentType=isFVG?"FVG":"IFVG"
+                bool typeAllowed=(isFVG and poiIncludeFVG) or (not isFVG and poiIncludeIFVG)
+                bool familyAllowed=z.primary or poiIncludeSecondaryFVG or na(z.episodeId)
+                if typeAllowed and familyAllowed
+                    array.push(unifiedPOIs,UnifiedPOI.new(
+                         "IMBALANCE",z.id,currentType,currentDir,z.top,z.bottom,z.bornBar,
+                         z.episodeId,na,z.primary,z.displacementScore,z.structureLinked,
+                         z.structureScope,z.structureKind,z.maxMitigationPct))
+
+    if array.size(orderBlocks)>0
+        for n=0 to array.size(orderBlocks)-1
+            OrderBlockZone z=array.get(orderBlocks,n)
+            if z.state<2
+                bool isOB=z.state==0
+                bool currentBull=isOB?z.direction==1:z.direction==-1
+                int currentDir=currentBull?1:-1
+                string currentType=isOB?"OB":"BB"
+                bool typeAllowed=(isOB and poiIncludeOB) or (not isOB and poiIncludeBB)
+                if typeAllowed
+                    array.push(unifiedPOIs,UnifiedPOI.new(
+                         "ORDERBLOCK",z.id,currentType,currentDir,z.top,z.bottom,z.bornBar,
+                         z.episodeId,z.fvgId,true,z.displacementScore,true,
+                         z.structureScope,z.structureKind,z.maxMitigationPct))
+
+f_nearestPOIIndex(int dir) =>
+    int found=-1
+    float bestDistance=na
+    if array.size(unifiedPOIs)>0
+        for n=0 to array.size(unifiedPOIs)-1
+            UnifiedPOI p=array.get(unifiedPOIs,n)
+            if p.direction==dir
+                float d=close>p.top?close-p.top:close<p.bottom?p.bottom-close:0.0
+                if na(bestDistance) or d<bestDistance
+                    bestDistance:=d
+                    found:=n
+    found
+
+f_findUnifiedPOIByKey(string sourceEngine,int sourceId) =>
+    int found=-1
+    if array.size(unifiedPOIs)>0
+        for n=0 to array.size(unifiedPOIs)-1
+            UnifiedPOI p=array.get(unifiedPOIs,n)
+            if p.sourceEngine==sourceEngine and p.sourceId==sourceId
+                found:=n
+                break
+    found
+
+f_auditInteractionPOI(int dir) =>
+    int found=-1
+    string klass="NONE"
+    float bestDistance=na
+    if auditEnabled and array.size(unifiedPOIs)>0
+        for n=0 to array.size(unifiedPOIs)-1
+            UnifiedPOI p=array.get(unifiedPOIs,n)
+            bool familyOK=not auditPrimaryOnly or p.primary
+            bool touch=p.direction==dir and familyOK and low<=p.top and high>=p.bottom
+            if touch
+                bool sweptBoundary=dir==1?low<p.bottom:high>p.top
+                float sweepBeyond=sweptBoundary?(dir==1?p.bottom-low:high-p.top):0.0
+                bool sweepWithin=not sweptBoundary or na(atr) or sweepBeyond<=auditMaxSweepBeyondATR*atr
+                string thisClass=(p.poiType=="IFVG" or p.poiType=="BB")?"FLIP_RETEST":sweptBoundary and sweepWithin?"SWEEP_RECLAIM":"REJECTION"
+                float d=math.abs(close-(p.top+p.bottom)*0.5)
+                if na(bestDistance) or d<bestDistance
+                    found:=n
+                    klass:=thisClass
+                    bestDistance:=d
+    [found,klass]
+
+f_auditCloseConfirmed(int dir,float top,float bottom,string klass) =>
+    float mid=(top+bottom)*0.5
+    float loc=(close-low)/math.max(high-low,syminfo.mintick)
+    bool directional=dir==1?(close>open and loc>=auditMinCloseLocation):(close<open and loc<=1.0-auditMinCloseLocation)
+    bool midpoint=dir==1?close>=mid:close<=mid
+    bool anyValid=dir==1?close>=bottom:close<=top
+    bool standard=auditConfirmationMode=="Directional Close"?directional:auditConfirmationMode=="Midpoint Reclaim"?midpoint:anyValid
+    bool sweepClose=dir==1?close>=bottom:close<=top
+    klass=="SWEEP_RECLAIM"?(sweepClose and standard):standard
+
+f_auditREVReason(int st) =>
+    st==1?"WAIT_SHIFT":st==2?"WAIT_POI":st==3?"WAIT_RETEST":st==4?"REACTION_GATE":st==5?"ELIGIBLE":"NO_ACTIVE_REV_STATE"
+
+f_auditCONTReason(int st) =>
+    st==1?"WAIT_POI":st==2?"WAIT_RETEST":st==3?"REACTION_GATE":st==4?"ELIGIBLE":"NO_ACTIVE_CONT_STATE"
+
+f_findREVPOI(int epId,int dir) =>
+    int found=-1
+    float bestDistance=na
+    int bestClass=999
+
+    if not na(epId) and array.size(unifiedPOIs)>0
+        for n=0 to array.size(unifiedPOIs)-1
+            UnifiedPOI p=array.get(unifiedPOIs,n)
+            if p.episodeId==epId and p.direction==dir and p.primary
+                bool isOBFamily=p.poiType=="OB" or p.poiType=="BB"
+                int classRank=revPOIPreference=="OB/BB first"?(isOBFamily?0:1):revPOIPreference=="FVG/IFVG first"?(isOBFamily?1:0):0
+                float d=close>p.top?close-p.top:close<p.bottom?p.bottom-close:0.0
+
+                bool better=false
+                if revPOIPreference=="Nearest"
+                    better:=na(bestDistance) or d<bestDistance
+                else
+                    better:=classRank<bestClass or (classRank==bestClass and (na(bestDistance) or d<bestDistance))
+
+                if better
+                    found:=n
+                    bestDistance:=d
+                    bestClass:=classRank
+    found
+
+f_findCONTPOI(int epId,int dir) =>
+    int found=-1
+    float bestDistance=na
+    int bestClass=999
+
+    if not na(epId) and array.size(unifiedPOIs)>0
+        for n=0 to array.size(unifiedPOIs)-1
+            UnifiedPOI p=array.get(unifiedPOIs,n)
+            if p.episodeId==epId and p.direction==dir and p.primary
+                bool isOBFamily=p.poiType=="OB" or p.poiType=="BB"
+                int classRank=contPOIPreference=="OB/BB first"?(isOBFamily?0:1):contPOIPreference=="FVG/IFVG first"?(isOBFamily?1:0):0
+                float d=close>p.top?close-p.top:close<p.bottom?p.bottom-close:0.0
+
+                bool better=false
+                if contPOIPreference=="Nearest"
+                    better:=na(bestDistance) or d<bestDistance
+                else
+                    better:=classRank<bestClass or (classRank==bestClass and (na(bestDistance) or d<bestDistance))
+
+                if better
+                    found:=n
+                    bestDistance:=d
+                    bestClass:=classRank
+    found
+
+f_episodeQualityScore(int epId) =>
+    int found=na
+    if episodeActive and episodeId==epId
+        found:=episodePeakScore
+    else if array.size(displacementEpisodes)>0
+        for n=array.size(displacementEpisodes)-1 to 0
+            DisplacementEpisode ep=array.get(displacementEpisodes,n)
+            if ep.id==epId
+                found:=ep.peakScore
+                break
+    found
+
+f_qualityGrade(int score) =>
+    score>=qualityGradeA?"A":score>=qualityGradeB?"B":score>=qualityGradeC?"C":"D"
+
+f_displacementQualityPoints(int epId) =>
+    int raw=f_episodeQualityScore(epId)
+    na(raw)?0:int(math.round(math.min(math.max(raw,0),100)*0.30))
+
+f_structureQualityPoints(string family,string scope,string kind) =>
+    int pts=0
+    if family=="REV"
+        pts:=scope=="EXTERNAL"?(kind=="MSS"?20:kind=="CHoCH"?18:12):(kind=="MSS"?15:kind=="CHoCH"?13:8)
+    else
+        pts:=scope=="EXTERNAL"?20:scope=="INTERNAL"?15:10
+    pts
+
+f_poiQualityPoints(UnifiedPOI p) =>
+    int pts=p.poiType=="OB" or p.poiType=="BB"?20:p.poiType=="IFVG"?16:14
+    if (p.poiType=="FVG" or p.poiType=="IFVG") and p.structureLinked
+        pts+=p.poiType=="FVG"?4:2
+    math.min(pts,20)
+
+f_mitigationQualityPoints(float pct) =>
+    na(pct)?0:pct<=25?15:pct<=50?13:pct<=75?9:pct<100?5:0
+
+f_revContextPoints(int tier) =>
+    na(tier)?0:tier==1?15:tier==2?12:tier==3?8:4
+
+type SignalRecord
+    string family
+    int direction
+    int episodeId
+    string poiEngine
+    int poiId
+    int bar
+    int score
+
+var array<SignalRecord> signalHistory=array.new<SignalRecord>()
+var label[] signalLabels=array.new_label()
+var int bullSignalCount=0
+var int bearSignalCount=0
+var int revSignalCount=0
+var int contSignalCount=0
+var int signalRejectedQuality=0
+var int signalRejectedDuplicate=0
+var int signalRejectedCooldown=0
+var int lastBullSignalBar=na
+var int lastBearSignalBar=na
+var string lastSignalText="NONE"
+
+f_signalDuplicate(string family,int epId,string poiEngine,int poiId) =>
+    bool duplicate=false
+    if oneSignalPerEpisodePOI and array.size(signalHistory)>0
+        for n=array.size(signalHistory)-1 to 0
+            SignalRecord sr=array.get(signalHistory,n)
+            if sr.family==family and sr.episodeId==epId and sr.poiEngine==poiEngine and sr.poiId==poiId
+                duplicate:=true
+                break
+    duplicate
+
+f_signalCooldownOK(int dir) =>
+    int lastBar=dir==1?lastBullSignalBar:lastBearSignalBar
+    na(lastBar) or bar_index-lastBar>signalCooldownBars
+
+f_signalEntryMarker(int dir,string family,int score,string grade) =>
+    label result=na
+    if showSignalMarkers
+        float y=dir==1?low:high
+        color c=dir==1?bullSignalColor:bearSignalColor
+        if modeExecution and showCompactExecutionEntries
+            string compact=(dir==1?"▲ ":"▼ ")+(family=="REV"?"R":"C")
+            result:=label.new(bar_index,y,compact,style=label.style_none,textcolor=c,size=size.small)
+        else if not modeExecution
+            string verbose=(dir==1?"BUY ":"SELL ")+family+" · Q"+str.tostring(score)+" "+grade
+            result:=label.new(bar_index,y,verbose,style=label.style_none,textcolor=c,size=f_textSize())
+    result
+
+f_signalScoreForPlan(string family,int epId,string poiEngine,int poiId) =>
+    int result=na
+    if array.size(signalHistory)>0
+        for n=array.size(signalHistory)-1 to 0
+            SignalRecord sr=array.get(signalHistory,n)
+            if sr.family==family and sr.episodeId==epId and sr.poiEngine==poiEngine and sr.poiId==poiId
+                result:=sr.score
+                break
+    result
+
+type RiskPlan
+    int id
+    string family
+    int direction
+    int episodeId
+    string poiEngine
+    int poiId
+    int signalBar
+    int signalTime
+    float entry
+    float stop
+    float target1
+    float target2
+    float rr1
+    float rr2
+    string target1Source
+    string target2Source
+    int state              // 0 ACTIVE, 1 T1_HIT, 2 T2_HIT, 3 STOPPED, 4 EXPIRED
+    int terminalTime
+    bool outcomeRecorded
+    float realizedR
+    string outcome
+    line entryLine
+    line stopLine
+    line target1Line
+    line target2Line
+    label entryTag
+    label stopTag
+    label target1Tag
+    label target2Tag
+    label statusTag
+
+var array<RiskPlan> riskPlans=array.new<RiskPlan>()
+var int nextRiskPlanId=1
+var int riskPlanCount=0
+var float lastPlanEntry=na
+var float lastPlanStop=na
+var float lastPlanT1=na
+var float lastPlanT2=na
+var float lastPlanRR1=na
+var float lastPlanRR2=na
+var string lastPlanText="NONE"
+
+var int completedTradeCount=0
+var int stoppedTradeCount=0
+var int expiredTradeCount=0
+var int t1ReachedCount=0
+var int t2ReachedCount=0
+var float totalRealizedR=0.0
+var float revRealizedR=0.0
+var float contRealizedR=0.0
+var int revClosedCount=0
+var int contClosedCount=0
+var int revWinCount=0
+var int contWinCount=0
+var int revLossCount=0
+var int contLossCount=0
+var string lastOutcomeText="NONE"
+var label[] outcomeLabels=array.new_label()
+var label[] recentEntryResultLabels=array.new_label()
+var int[] recentEntryResultIds=array.new_int()
+
+f_recentEntryText(string family,int dir,int score,float entry,string status,float realizedR) =>
+    string grade=na(score)?"":f_qualityGrade(score)
+    string scoreText=na(score)?"":" · Q"+str.tostring(score)+" "+grade
+    string rText=na(realizedR)?"":" · "+(realizedR>0?"+":"")+str.tostring(realizedR,"#.00")+"R"
+    family+" "+(dir==1?"BUY":"SELL")+scoreText+"\nENTRY "+str.tostring(entry,format.mintick)+"\n"+status+rText
+
+f_addRecentEntryCard(int planId,string family,int dir,int epId,string poiEngine,int poiId,int signalTime,float entry) =>
+    if showRecentEntryResults
+        int score=f_signalScoreForPlan(family,epId,poiEngine,poiId)
+        string txt=f_recentEntryText(family,dir,score,entry,"ACTIVE",na)
+        color bg=dir==1?bullSignalColor:bearSignalColor
+        label lb=label.new(signalTime,entry,txt,xloc=xloc.bar_time,style=dir==1?label.style_label_up:label.style_label_down,color=color.new(bg,15),textcolor=color.white,size=size.small)
+        array.push(recentEntryResultIds,planId)
+        array.push(recentEntryResultLabels,lb)
+        while array.size(recentEntryResultLabels)>recentEntryResultCount
+            array.shift(recentEntryResultIds)
+            label.delete(array.shift(recentEntryResultLabels))
+
+f_updateRecentEntryCard(int planId,string family,int dir,int epId,string poiEngine,int poiId,float entry,string status,float realizedR) =>
+    if showRecentEntryResults and array.size(recentEntryResultIds)>0
+        int found=-1
+        for n=0 to array.size(recentEntryResultIds)-1
+            if array.get(recentEntryResultIds,n)==planId
+                found:=n
+                break
+        if found>=0
+            label lb=array.get(recentEntryResultLabels,found)
+            int score=f_signalScoreForPlan(family,epId,poiEngine,poiId)
+            label.set_text(lb,f_recentEntryText(family,dir,score,entry,status,realizedR))
+            color bg=na(realizedR)?(dir==1?bullSignalColor:bearSignalColor):realizedR>=0?bullSignalColor:bearSignalColor
+            label.set_color(lb,color.new(bg,15))
+            label.set_textcolor(lb,color.white)
+
+f_planStop(string family,int dir,float entryPrice,float poiTop,float poiBottom,float sweepPrice,float protectedLevel) =>
+    float buffer=atr*stopBufferATR
+    float poiEdge=dir==1?poiBottom:poiTop
+    float causalBase=na
+    if family=="REV"
+        causalBase:=dir==1?(na(sweepPrice)?poiEdge:math.min(sweepPrice,poiEdge)):(na(sweepPrice)?poiEdge:math.max(sweepPrice,poiEdge))
+    else
+        causalBase:=na(protectedLevel)?poiEdge:(dir==1?math.min(protectedLevel,poiEdge):math.max(protectedLevel,poiEdge))
+
+    float base=riskStopMode=="POI edge"?poiEdge:riskStopMode=="Protected swing"?(na(protectedLevel)?poiEdge:protectedLevel):causalBase
+    float result=dir==1?base-buffer:base+buffer
+
+    // Guarantee stop remains on the risk side of entry.
+    if dir==1 and (na(result) or result>=entryPrice)
+        result:=entryPrice-math.max(atr*0.50,syminfo.mintick)
+    if dir==-1 and (na(result) or result<=entryPrice)
+        result:=entryPrice+math.max(atr*0.50,syminfo.mintick)
+    result
+
+//=============================================================================
+// LIQUIDITY HELPERS
+//=============================================================================
+var array<LiquidityLevel> liquidity=array.new<LiquidityLevel>()
+var int nextLiquidityId=1
+var int duplicateSuppressions=0
+var int liquiditySweepCount=0
+var int liquidityResolutionCount=0
+var int liquidityExpiryCount=0
+var int liquiditySupersedeCount=0
+
+f_activeLiquidityTargets(int dir,float entryPrice) =>
+    float first=na
+    float second=na
+    float firstDistance=na
+    float secondDistance=na
+    if array.size(liquidity)>0
+        for n=0 to array.size(liquidity)-1
+            LiquidityLevel q=array.get(liquidity,n)
+            bool candidate=q.state==0 and (dir==1?(q.buySide and q.price>entryPrice):(not q.buySide and q.price<entryPrice))
+            if candidate
+                float d=math.abs(q.price-entryPrice)
+                if na(firstDistance) or d<firstDistance
+                    second:=first
+                    secondDistance:=firstDistance
+                    first:=q.price
+                    firstDistance:=d
+                else if na(secondDistance) or d<secondDistance
+                    second:=q.price
+                    secondDistance:=d
+    [first,second]
+
+f_near(float a,float b,float tol) =>
+    not na(a) and not na(b) and math.abs(a-b)<=tol
+
+f_tierColor(int tier) =>
+    tier==1?tier1Color:tier==2?tier2Color:tier==3?tier3Color:tier4Color
+
+f_tierVisible(int tier) =>
+    tier==1?showTier1:tier==2?showTier2:tier==3?showTier3:showTier4
+
+f_deleteLiquidity(LiquidityLevel q) =>
+    if not na(q.ln)
+        line.delete(q.ln)
+    if not na(q.lb)
+        label.delete(q.lb)
+
+f_trimLiquidity() =>
+    while array.size(liquidity)>maxLiquidity
+        LiquidityLevel old=array.shift(liquidity)
+        f_deleteLiquidity(old)
+
+f_findActiveSwingNear(float price,bool buySide,float tol) =>
+    int found=-1
+    if array.size(liquidity)>0
+        for n=array.size(liquidity)-1 to 0
+            LiquidityLevel q=array.get(liquidity,n)
+            bool swingType=q.sourceType=="EXTERNAL_SWING" or q.sourceType=="INTERNAL_SWING" or q.sourceType=="SWING_CLUSTER"
+            if q.state==0 and swingType and q.buySide==buySide and f_near(q.price,price,tol)
+                found:=n
+                break
+    found
+
+f_registerReference(int id,float price,bool buySide,int tier,string sourceType,string sourceName,int createdBar,int startTime) =>
+    bool created=false
+    if not na(price)
+        color c=f_tierColor(tier)
+        line ln=line.new(startTime,price,time,price,xloc=xloc.bar_time,extend=extend.none,color=f_hidden(c))
+        label lb=label.new(time,price,"",xloc=xloc.bar_time,style=label.style_none,size=f_textSize())
+        array.push(liquidity,LiquidityLevel.new(id,price,buySide,tier,0,createdBar,na,na,startTime,na,sourceType,sourceName,na,1,ln,lb))
+        f_trimLiquidity()
+        created:=true
+    created
+
+f_registerSwing(int id,float price,bool buySide,int tier,string sourceType,string sourceName,int pivotBar,int startTime,int expiryBar) =>
+    bool created=false
+    int idx=f_findActiveSwingNear(price,buySide,liquidityTolerance)
+    if idx>=0
+        LiquidityLevel q=array.get(liquidity,idx)
+        q.clusterCount+=1
+        // Preserve the stronger tier/source as primary.
+        if tier<q.tier
+            q.tier:=tier
+            q.sourceType:=sourceType
+            q.sourceName:=sourceName
+            q.originSwingBar:=pivotBar
+        else if q.clusterCount>=2 and q.sourceType!="EXTERNAL_SWING"
+            q.sourceType:="SWING_CLUSTER"
+            q.sourceName:=buySide?"EQH":"EQL"
+            q.tier:=math.min(q.tier,3)
+        // Extend expiry when fresh independent swing evidence arrives.
+        q.expiryBar:=na(q.expiryBar)?expiryBar:math.max(q.expiryBar,expiryBar)
+        array.set(liquidity,idx,q)
+    else if not na(price)
+        color c=f_tierColor(tier)
+        line ln=line.new(startTime,price,time,price,xloc=xloc.bar_time,extend=extend.none,color=f_hidden(c))
+        label lb=label.new(time,price,"",xloc=xloc.bar_time,style=label.style_none,size=f_textSize())
+        array.push(liquidity,LiquidityLevel.new(id,price,buySide,tier,0,bar_index,na,expiryBar,startTime,na,sourceType,sourceName,pivotBar,1,ln,lb))
+        f_trimLiquidity()
+        created:=true
+    created
+
+f_supersedeSource(string sourceName) =>
+    int changed=0
+    if array.size(liquidity)>0
+        for n=0 to array.size(liquidity)-1
+            LiquidityLevel q=array.get(liquidity,n)
+            if q.state==0 and q.sourceName==sourceName
+                q.state:=4
+                q.terminalBar:=bar_index
+                q.endTime:=time
+                array.set(liquidity,n,q)
+                changed+=1
+    changed
+
+//=============================================================================
+// PIVOTS / SWINGS
+//=============================================================================
+float iPH=ta.pivothigh(high,iLen,iLen)
+float iPL=ta.pivotlow(low,iLen,iLen)
+float xPH=ta.pivothigh(high,xLen,xLen)
+float xPL=ta.pivotlow(low,xLen,xLen)
+
+bool newIPH=barstate.isconfirmed and not na(iPH)
+bool newIPL=barstate.isconfirmed and not na(iPL)
+bool newXPH=barstate.isconfirmed and not na(xPH)
+bool newXPL=barstate.isconfirmed and not na(xPL)
+
+var float iHigh=na
+var float iLow=na
+var float iPriorHigh=na
+var float iPriorLow=na
+var int iHighBar=na
+var int iLowBar=na
+var int iHighTime=na
+var int iLowTime=na
+var string iHighClass="NONE"
+var string iLowClass="NONE"
+
+var float xHigh=na
+var float xLow=na
+var float xPriorHigh=na
+var float xPriorLow=na
+var int xHighBar=na
+var int xLowBar=na
+var int xHighTime=na
+var int xLowTime=na
+var string xHighClass="NONE"
+var string xLowClass="NONE"
+
+if newIPH
+    iPriorHigh:=iHigh
+    iHigh:=iPH
+    iHighBar:=bar_index-iLen
+    iHighTime:=time[iLen]
+    iHighClass:=na(iPriorHigh)?"HH":iHigh>iPriorHigh?"HH":"LH"
+    if useInternalSwingLiquidity
+        bool made=f_registerSwing(nextLiquidityId,iHigh,true,4,"INTERNAL_SWING","iH",iHighBar,iHighTime,bar_index+internalSwingMaxAge)
+        if made
+            nextLiquidityId+=1
+        else
+            duplicateSuppressions+=1
+
+if newIPL
+    iPriorLow:=iLow
+    iLow:=iPL
+    iLowBar:=bar_index-iLen
+    iLowTime:=time[iLen]
+    iLowClass:=na(iPriorLow)?"HL":iLow>iPriorLow?"HL":"LL"
+    if useInternalSwingLiquidity
+        bool made=f_registerSwing(nextLiquidityId,iLow,false,4,"INTERNAL_SWING","iL",iLowBar,iLowTime,bar_index+internalSwingMaxAge)
+        if made
+            nextLiquidityId+=1
+        else
+            duplicateSuppressions+=1
+
+if newXPH
+    xPriorHigh:=xHigh
+    xHigh:=xPH
+    xHighBar:=bar_index-xLen
+    xHighTime:=time[xLen]
+    xHighClass:=na(xPriorHigh)?"HH":xHigh>xPriorHigh?"HH":"LH"
+    if useExternalSwingLiquidity
+        bool made=f_registerSwing(nextLiquidityId,xHigh,true,2,"EXTERNAL_SWING","xH",xHighBar,xHighTime,bar_index+externalSwingMaxAge)
+        if made
+            nextLiquidityId+=1
+        else
+            duplicateSuppressions+=1
+
+if newXPL
+    xPriorLow:=xLow
+    xLow:=xPL
+    xLowBar:=bar_index-xLen
+    xLowTime:=time[xLen]
+    xLowClass:=na(xPriorLow)?"HL":xLow>xPriorLow?"HL":"LL"
+    if useExternalSwingLiquidity
+        bool made=f_registerSwing(nextLiquidityId,xLow,false,2,"EXTERNAL_SWING","xL",xLowBar,xLowTime,bar_index+externalSwingMaxAge)
+        if made
+            nextLiquidityId+=1
+        else
+            duplicateSuppressions+=1
+
+//=============================================================================
+// STRUCTURE TARGETS / STATE
+//=============================================================================
+var float iTargetHigh=na
+var int iTargetHighTime=na
+var bool iHighWaiting=false
+var float iTargetLow=na
+var int iTargetLowTime=na
+var bool iLowWaiting=false
+
+var float xTargetHigh=na
+var int xTargetHighTime=na
+var bool xHighWaiting=false
+var float xTargetLow=na
+var int xTargetLowTime=na
+var bool xLowWaiting=false
+
+if newIPH and not iHighWaiting
+    iTargetHigh:=iPH
+    iTargetHighTime:=iHighTime
+    iHighWaiting:=true
+if newIPL and not iLowWaiting
+    iTargetLow:=iPL
+    iTargetLowTime:=iLowTime
+    iLowWaiting:=true
+if newXPH and not xHighWaiting
+    xTargetHigh:=xPH
+    xTargetHighTime:=xHighTime
+    xHighWaiting:=true
+if newXPL and not xLowWaiting
+    xTargetLow:=xPL
+    xTargetLowTime:=xLowTime
+    xLowWaiting:=true
+
+var int iTrend=0
+var int xTrend=0
+var float iProtectedLow=na
+var float iProtectedHigh=na
+var float xProtectedLow=na
+var float xProtectedHigh=na
+var int iProtectedLowTime=na
+var int iProtectedHighTime=na
+var int xProtectedLowTime=na
+var int xProtectedHighTime=na
+
+int oldITrend=iTrend
+int oldXTrend=xTrend
+
+bool iBullBreak=barstate.isconfirmed and iHighWaiting and not na(iTargetHigh) and (requireClose?close>iTargetHigh:high>iTargetHigh)
+bool iBearBreak=barstate.isconfirmed and iLowWaiting and not na(iTargetLow) and (requireClose?close<iTargetLow:low<iTargetLow)
+bool xBullBreak=barstate.isconfirmed and xHighWaiting and not na(xTargetHigh) and (requireClose?close>xTargetHigh:high>xTargetHigh)
+bool xBearBreak=barstate.isconfirmed and xLowWaiting and not na(xTargetLow) and (requireClose?close<xTargetLow:low<xTargetLow)
+
+bool iBullMSS=iBullBreak and oldITrend<0 and bullDisplacementEvent
+bool iBearMSS=iBearBreak and oldITrend>0 and bearDisplacementEvent
+bool xBullMSS=xBullBreak and oldXTrend<0 and bullDisplacementEvent
+bool xBearMSS=xBearBreak and oldXTrend>0 and bearDisplacementEvent
+
+bool iBullCH=iBullBreak and oldITrend<0 and not iBullMSS
+bool iBearCH=iBearBreak and oldITrend>0 and not iBearMSS
+bool xBullCH=xBullBreak and oldXTrend<0 and not xBullMSS
+bool xBearCH=xBearBreak and oldXTrend>0 and not xBearMSS
+
+bool iBullBOS=iBullBreak and not iBullCH and not iBullMSS
+bool iBearBOS=iBearBreak and not iBearCH and not iBearMSS
+bool xBullBOS=xBullBreak and not xBullCH and not xBullMSS
+bool xBearBOS=xBearBreak and not xBearCH and not xBearMSS
+
+if bullDisplacementEvent
+    string scope=(iBullBreak and xBullBreak)?"BOTH":xBullBreak?"EXTERNAL":iBullBreak?"INTERNAL":"NONE"
+    string kind=(iBullMSS or xBullMSS)?"MSS":(iBullCH or xBullCH)?"CHoCH":(iBullBOS or xBullBOS)?"BOS":"NONE"
+    array.push(displacementEvents,DisplacementEvent.new(nextDisplacementId,1,bar_index,bullDisplacementScore,displacementBodyATR,displacementRangeATR,displacementBodyPct,bullCloseLocation,bullFollowThrough,volumeExpanded,iBullBreak or xBullBreak,scope,kind))
+    nextDisplacementId+=1
+    bullDisplacementCount+=1
+    lastBullDisplacementBar:=bar_index
+    lastBullDisplacementScore:=bullDisplacementScore
+    if showDisplacementMarkers
+        label dl=label.new(bar_index,low,"DSP ↑ "+str.tostring(bullDisplacementScore),style=label.style_none,textcolor=bullDisplacementColor,size=f_textSize())
+        array.push(displacementLabels,dl)
+
+if bearDisplacementEvent
+    string scope=(iBearBreak and xBearBreak)?"BOTH":xBearBreak?"EXTERNAL":iBearBreak?"INTERNAL":"NONE"
+    string kind=(iBearMSS or xBearMSS)?"MSS":(iBearCH or xBearCH)?"CHoCH":(iBearBOS or xBearBOS)?"BOS":"NONE"
+    array.push(displacementEvents,DisplacementEvent.new(nextDisplacementId,-1,bar_index,bearDisplacementScore,displacementBodyATR,displacementRangeATR,displacementBodyPct,bearCloseLocation,bearFollowThrough,volumeExpanded,iBearBreak or xBearBreak,scope,kind))
+    nextDisplacementId+=1
+    bearDisplacementCount+=1
+    lastBearDisplacementBar:=bar_index
+    lastBearDisplacementScore:=bearDisplacementScore
+    if showDisplacementMarkers
+        label dl=label.new(bar_index,high,"DSP ↓ "+str.tostring(bearDisplacementScore),style=label.style_none,textcolor=bearDisplacementColor,size=f_textSize())
+        array.push(displacementLabels,dl)
+
+while array.size(displacementEvents)>200
+    array.shift(displacementEvents)
+while array.size(displacementLabels)>maxDisplacementMarkers
+    label.delete(array.shift(displacementLabels))
+
+//=============================================================================
+// DISPLACEMENT EPISODE AGGREGATION
+// A directional episode may contain multiple qualified DSP bars separated by
+// a small confirmed-bar gap. Downstream engines should consume episodes rather
+// than treating every DSP bar as an independent institutional impulse.
+//=============================================================================
+bool anyDSP=bullDisplacementEvent or bearDisplacementEvent
+int currentDSPDirection=bullDisplacementEvent?1:bearDisplacementEvent?-1:0
+int currentDSPScore=bullDisplacementEvent?bullDisplacementScore:bearDisplacementEvent?bearDisplacementScore:0
+
+bool gapExceeded=episodeActive and not na(episodeLastDSPBar) and bar_index-episodeLastDSPBar>episodeGapBars+1
+bool durationExceeded=episodeActive and not na(episodeStartBar) and bar_index-episodeStartBar>=episodeMaxBars
+bool oppositeDSP=episodeActive and anyDSP and currentDSPDirection!=episodeDirection
+bool finalizeEpisode=episodeActive and (gapExceeded or durationExceeded or oppositeDSP)
+bool bullEpisodeCompleted=finalizeEpisode and episodeDirection==1
+bool bearEpisodeCompleted=finalizeEpisode and episodeDirection==-1
+
+if finalizeEpisode
+    array.push(displacementEpisodes,DisplacementEpisode.new(
+         episodeId,episodeDirection,episodeStartBar,episodeLastDSPBar,episodePeakBar,episodePeakScore,
+         episodeEventCount,episodeHigh,episodeLow,episodeTotalBodyATR,
+         episodeStructureBreak,episodeStructureScope,episodeStructureKind))
+    while array.size(displacementEpisodes)>100
+        array.shift(displacementEpisodes)
+
+    completedEpisodeCount+=1
+    if episodeDirection==1
+        bullEpisodeCount+=1
+    else
+        bearEpisodeCount+=1
+
+    lastCompletedEpisodeDirection:=episodeDirection
+    lastCompletedEpisodePeakScore:=episodePeakScore
+    lastCompletedEpisodeBars:=episodeLastDSPBar-episodeStartBar+1
+
+    if showEpisodeMarkers
+        float markerY=episodeDirection==1?episodeLow:episodeHigh
+        string markerText=(episodeDirection==1?"EP ↑ ":"EP ↓ ")+str.tostring(episodePeakScore)+" · "+str.tostring(episodeEventCount)+" DSP"
+        label ep=label.new(episodePeakBar,markerY,markerText,style=label.style_none,textcolor=episodeDirection==1?bullDisplacementColor:bearDisplacementColor,size=f_textSize())
+        array.push(episodeLabels,ep)
+        while array.size(episodeLabels)>40
+            label.delete(array.shift(episodeLabels))
+
+    episodeActive:=false
+    episodeId:=na
+    episodeDirection:=0
+    episodeStartBar:=na
+    episodeLastDSPBar:=na
+    episodePeakBar:=na
+    episodePeakScore:=na
+    episodeEventCount:=0
+    episodeHigh:=na
+    episodeLow:=na
+    episodeTotalBodyATR:=0.0
+    episodeStructureBreak:=false
+    episodeStructureScope:="NONE"
+    episodeStructureKind:="NONE"
+
+// Start a new episode after finalizing an opposite/expired episode, or when idle.
+if anyDSP and not episodeActive
+    episodeActive:=true
+    episodeId:=nextEpisodeId
+    nextEpisodeId+=1
+    episodeDirection:=currentDSPDirection
+    episodeStartBar:=bar_index
+    episodeLastDSPBar:=bar_index
+    episodePeakBar:=bar_index
+    episodePeakScore:=currentDSPScore
+    episodeEventCount:=1
+    episodeHigh:=high
+    episodeLow:=low
+    episodeTotalBodyATR:=displacementBodyATR
+    episodeStructureBreak:=(currentDSPDirection==1?(iBullBreak or xBullBreak):(iBearBreak or xBearBreak))
+    episodeStructureScope:=currentDSPDirection==1?((iBullBreak and xBullBreak)?"BOTH":xBullBreak?"EXTERNAL":iBullBreak?"INTERNAL":"NONE"):((iBearBreak and xBearBreak)?"BOTH":xBearBreak?"EXTERNAL":iBearBreak?"INTERNAL":"NONE")
+    episodeStructureKind:=currentDSPDirection==1?((iBullMSS or xBullMSS)?"MSS":(iBullCH or xBullCH)?"CHoCH":(iBullBOS or xBullBOS)?"BOS":"NONE"):((iBearMSS or xBearMSS)?"MSS":(iBearCH or xBearCH)?"CHoCH":(iBearBOS or xBearBOS)?"BOS":"NONE")
+
+// Extend the active episode only with same-direction qualifying DSP bars.
+else if anyDSP and episodeActive and currentDSPDirection==episodeDirection
+    episodeLastDSPBar:=bar_index
+    episodeEventCount+=1
+    episodeHigh:=math.max(episodeHigh,high)
+    episodeLow:=math.min(episodeLow,low)
+    episodeTotalBodyATR+=displacementBodyATR
+
+    if currentDSPScore>episodePeakScore
+        episodePeakScore:=currentDSPScore
+        episodePeakBar:=bar_index
+
+    bool thisStructureBreak=currentDSPDirection==1?(iBullBreak or xBullBreak):(iBearBreak or xBearBreak)
+    if thisStructureBreak
+        episodeStructureBreak:=true
+        string thisScope=currentDSPDirection==1?((iBullBreak and xBullBreak)?"BOTH":xBullBreak?"EXTERNAL":iBullBreak?"INTERNAL":"NONE"):((iBearBreak and xBearBreak)?"BOTH":xBearBreak?"EXTERNAL":iBearBreak?"INTERNAL":"NONE")
+        string thisKind=currentDSPDirection==1?((iBullMSS or xBullMSS)?"MSS":(iBullCH or xBullCH)?"CHoCH":(iBullBOS or xBullBOS)?"BOS":"NONE"):((iBearMSS or xBearMSS)?"MSS":(iBearCH or xBearCH)?"CHoCH":(iBearBOS or xBearBOS)?"BOS":"NONE")
+        episodeStructureScope:=thisScope
+        episodeStructureKind:=thisKind
+
+//=============================================================================
+// FVG / IFVG + POI PROVENANCE
+//=============================================================================
+
+// Resolve the episode most plausibly responsible for an imbalance born now.
+// Prefer an active same-direction episode; otherwise use the latest completed
+// same-direction episode whose end is within the provenance window.
+f_findEpisodeProvenance(int dir) =>
+    int foundId=na
+    int foundScore=na
+    bool foundStructure=false
+    string foundScope="NONE"
+    string foundKind="NONE"
+
+    if episodeActive and episodeDirection==dir and not na(episodeLastDSPBar) and bar_index-episodeLastDSPBar<=fvgProvenanceWindow
+        foundId:=episodeId
+        foundScore:=episodePeakScore
+        foundStructure:=episodeStructureBreak
+        foundScope:=episodeStructureScope
+        foundKind:=episodeStructureKind
+    else if array.size(displacementEpisodes)>0
+        for n=array.size(displacementEpisodes)-1 to 0
+            DisplacementEpisode ep=array.get(displacementEpisodes,n)
+            if ep.direction==dir and bar_index-ep.endBar<=fvgProvenanceWindow
+                foundId:=ep.id
+                foundScore:=ep.peakScore
+                foundStructure:=ep.structureBreak
+                foundScope:=ep.structureScope
+                foundKind:=ep.structureKind
+                break
+    [foundId,foundScore,foundStructure,foundScope,foundKind]
+
+bool rawBullFVG=barstate.isconfirmed and low>high[2]
+bool rawBearFVG=barstate.isconfirmed and high<low[2]
+float bullFVGSize=rawBullFVG?low-high[2]:0.0
+float bearFVGSize=rawBearFVG?low[2]-high:0.0
+bool bullSizeOK=rawBullFVG and (atr<=0 or bullFVGSize/atr>=minFVGATR)
+bool bearSizeOK=rawBearFVG and (atr<=0 or bearFVGSize/atr>=minFVGATR)
+
+[bullEpisodeId,bullProvScore,bullStructureLinked,bullStructureScope,bullStructureKind]=f_findEpisodeProvenance(1)
+[bearEpisodeId,bearProvScore,bearStructureLinked,bearStructureScope,bearStructureKind]=f_findEpisodeProvenance(-1)
+
+bool bullCausal=not na(bullEpisodeId)
+bool bearCausal=not na(bearEpisodeId)
+
+bool bullCreateAllowed=fvgCreationMode=="All" or (fvgCreationMode=="Displacement-linked" and bullCausal) or (fvgCreationMode=="Structural" and bullCausal and bullStructureLinked)
+bool bearCreateAllowed=fvgCreationMode=="All" or (fvgCreationMode=="Displacement-linked" and bearCausal) or (fvgCreationMode=="Structural" and bearCausal and bearStructureLinked)
+
+bool bullFVGEvent=bullSizeOK and bullCreateAllowed
+bool bearFVGEvent=bearSizeOK and bearCreateAllowed
+
+f_qualityClass(bool causal,bool structural) =>
+    structural?"STRUCTURAL":causal?"DISPLACEMENT":"ORDINARY"
+
+bool newBullPrimaryStructuralFVG=false
+bool newBearPrimaryStructuralFVG=false
+int newBullPrimaryFVGId=na
+int newBearPrimaryFVGId=na
+int newBullPrimaryEpisodeId=na
+int newBearPrimaryEpisodeId=na
+int newBullPrimaryScore=na
+int newBearPrimaryScore=na
+string newBullPrimaryScope="NONE"
+string newBearPrimaryScope="NONE"
+string newBullPrimaryKind="NONE"
+string newBearPrimaryKind="NONE"
+
+if bullFVGEvent
+    string quality=f_qualityClass(bullCausal,bullStructureLinked)
+    color c=bullFVGColor
+    string txt=showPOIProvenance?"FVG · "+quality+(na(bullEpisodeId)?"":" · EP"+str.tostring(bullEpisodeId)):"FVG"
+    box bx=box.new(bar_index-2,low,bar_index,high[2],xloc=xloc.bar_index,extend=extend.none,bgcolor=color.new(c,fvgTransparency),border_color=color.new(c,20),text=txt,text_color=c,text_size=f_textSize(),text_halign=text.align_right,text_valign=text.align_center)
+    int epPeak=f_episodePeakBar(bullEpisodeId)
+    float gapATR=atr>0?bullFVGSize/atr:0.0
+    array.push(imbalanceZones,ImbalanceZone.new(nextImbalanceId,1,0,low,high[2],bar_index,na,bullEpisodeId,bullProvScore,bullStructureLinked,bullStructureScope,bullStructureKind,quality,true,epPeak,gapATR,0.0,bx))
+    int newIndex=array.size(imbalanceZones)-1
+    bool becamePrimary=f_assignPrimaryForEpisode(newIndex,bullEpisodeId,1)
+    if becamePrimary
+        primaryFVGCount+=1
+        if bullStructureLinked
+            newBullPrimaryStructuralFVG:=true
+            newBullPrimaryFVGId:=nextImbalanceId
+            newBullPrimaryEpisodeId:=bullEpisodeId
+            newBullPrimaryScore:=bullProvScore
+            newBullPrimaryScope:=bullStructureScope
+            newBullPrimaryKind:=bullStructureKind
+    else
+        secondaryFVGCount+=1
+    nextImbalanceId+=1
+    bullFVGCount+=1
+    if quality=="STRUCTURAL"
+        structuralFVGCount+=1
+    else if quality=="DISPLACEMENT"
+        displacementFVGCount+=1
+    else
+        ordinaryFVGCount+=1
+    f_trimImbalances()
+
+if bearFVGEvent
+    string quality=f_qualityClass(bearCausal,bearStructureLinked)
+    color c=bearFVGColor
+    string txt=showPOIProvenance?"FVG · "+quality+(na(bearEpisodeId)?"":" · EP"+str.tostring(bearEpisodeId)):"FVG"
+    box bx=box.new(bar_index-2,low[2],bar_index,high,xloc=xloc.bar_index,extend=extend.none,bgcolor=color.new(c,fvgTransparency),border_color=color.new(c,20),text=txt,text_color=c,text_size=f_textSize(),text_halign=text.align_right,text_valign=text.align_center)
+    int epPeak=f_episodePeakBar(bearEpisodeId)
+    float gapATR=atr>0?bearFVGSize/atr:0.0
+    array.push(imbalanceZones,ImbalanceZone.new(nextImbalanceId,-1,0,low[2],high,bar_index,na,bearEpisodeId,bearProvScore,bearStructureLinked,bearStructureScope,bearStructureKind,quality,true,epPeak,gapATR,0.0,bx))
+    int newIndex=array.size(imbalanceZones)-1
+    bool becamePrimary=f_assignPrimaryForEpisode(newIndex,bearEpisodeId,-1)
+    if becamePrimary
+        primaryFVGCount+=1
+        if bearStructureLinked
+            newBearPrimaryStructuralFVG:=true
+            newBearPrimaryFVGId:=nextImbalanceId
+            newBearPrimaryEpisodeId:=bearEpisodeId
+            newBearPrimaryScore:=bearProvScore
+            newBearPrimaryScope:=bearStructureScope
+            newBearPrimaryKind:=bearStructureKind
+    else
+        secondaryFVGCount+=1
+    nextImbalanceId+=1
+    bearFVGCount+=1
+    if quality=="STRUCTURAL"
+        structuralFVGCount+=1
+    else if quality=="DISPLACEMENT"
+        displacementFVGCount+=1
+    else
+        ordinaryFVGCount+=1
+    f_trimImbalances()
+
+bool bullIFVGEvent=false
+bool bearIFVGEvent=false
+
+if array.size(imbalanceZones)>0
+    for n=0 to array.size(imbalanceZones)-1
+        ImbalanceZone z=array.get(imbalanceZones,n)
+
+        if z.state==0
+            float zoneHeight=math.max(z.top-z.bottom,syminfo.mintick)
+            float overlapTop=math.min(high,z.top)
+            float overlapBottom=math.max(low,z.bottom)
+            float overlap=math.max(overlapTop-overlapBottom,0.0)
+            float mitigationPct=100.0*overlap/zoneHeight
+            z.maxMitigationPct:=math.max(z.maxMitigationPct,mitigationPct)
+
+            bool bullFullWick=z.direction==1 and low<=z.bottom
+            bool bearFullWick=z.direction==-1 and high>=z.top
+
+            bool bullFlipClose=z.direction==1 and close<z.bottom
+            bool bearFlipClose=z.direction==-1 and close>z.top
+            bool bullFlipBody=z.direction==1 and open<z.bottom and close<z.bottom
+            bool bearFlipBody=z.direction==-1 and open>z.top and close>z.top
+
+            bool flipToBear=ifvgFlipMode=="Full body beyond boundary"?bullFlipBody:bullFlipClose
+            bool flipToBull=ifvgFlipMode=="Full body beyond boundary"?bearFlipBody:bearFlipClose
+
+            if flipToBear
+                z.state:=1
+                bearIFVGEvent:=true
+                bearIFVGCount+=1
+            else if flipToBull
+                z.state:=1
+                bullIFVGEvent:=true
+                bullIFVGCount+=1
+            else if (z.direction==1 and retireFVGOnFullWickFill and bullFullWick) or (z.direction==-1 and retireFVGOnFullWickFill and bearFullWick)
+                z.state:=2
+                z.terminalBar:=bar_index
+                retiredImbalanceCount+=1
+
+        else if z.state==1
+            // Inverted direction is opposite the original FVG direction.
+            bool ifvgBull=z.direction==-1
+            bool ifvgBear=z.direction==1
+            bool fullTraverse=ifvgBull?low<=z.bottom:high>=z.top
+            bool invalidClose=ifvgBull?close<z.bottom:close>z.top
+
+            if invalidClose or (retireIFVGOnFullWickFill and fullTraverse)
+                z.state:=2
+                z.terminalBar:=bar_index
+                retiredImbalanceCount+=1
+
+        bool active=z.state<2
+        bool isFVG=z.state==0
+        bool isIFVG=z.state==1
+        bool bullVisual=isFVG?z.direction==1:z.direction==-1
+        color c=isIFVG?(bullVisual?bullIFVGColor:bearIFVGColor):(bullVisual?bullFVGColor:bearFVGColor)
+        bool familyVisible=z.primary or showSecondaryFVGs or na(z.episodeId)
+        bool visible=active and familyVisible and ((isFVG and showFVGZones) or (isIFVG and showIFVGZones))
+
+        if not na(z.bx)
+            box.set_right(z.bx,active?bar_index:(na(z.terminalBar)?bar_index:z.terminalBar))
+            box.set_bgcolor(z.bx,visible?color.new(c,fvgTransparency):color.new(c,100))
+            box.set_border_color(z.bx,visible?color.new(c,20):color.new(c,100))
+            string kind=isIFVG?"IFVG":"FVG"
+            string familyTag=z.primary?" · PRIMARY":" · SECONDARY"
+            string prov=showPOIProvenance?" · "+z.qualityClass+(na(z.episodeId)?"":" · EP"+str.tostring(z.episodeId))+familyTag:""
+            box.set_text(z.bx,visible?kind+prov:"")
+            box.set_text_color(z.bx,c)
+            box.set_text_size(z.bx,f_textSize())
+            box.set_text_halign(z.bx,text.align_right)
+            box.set_text_valign(z.bx,text.align_center)
+
+        array.set(imbalanceZones,n,z)
+
+//=============================================================================
+// CAUSAL ORDER BLOCK / BREAKER BLOCK
+//=============================================================================
+bool bullOBEvent=false
+bool bearOBEvent=false
+bool bullBBEvent=false
+bool bearBBEvent=false
+
+bool bullOBTrigger=requirePrimaryStructuralFVG?newBullPrimaryStructuralFVG:(bullFVGEvent and bullCausal and bullStructureLinked)
+bool bearOBTrigger=requirePrimaryStructuralFVG?newBearPrimaryStructuralFVG:(bearFVGEvent and bearCausal and bearStructureLinked)
+
+if bullOBTrigger and not na(newBullPrimaryEpisodeId) and not f_hasOrderBlockForEpisode(newBullPrimaryEpisodeId,1)
+    [originBar,originTime,zoneTop,zoneBottom]=f_findOBOrigin(newBullPrimaryEpisodeId,1)
+    if not na(originBar) and not na(originTime) and not na(zoneTop) and not na(zoneBottom)
+        string txt=showOBProvenance?"OB · EP"+str.tostring(newBullPrimaryEpisodeId)+" · "+newBullPrimaryKind:"OB"
+        box bx=box.new(originTime,zoneTop,time,zoneBottom,xloc=xloc.bar_time,extend=extend.none,bgcolor=color.new(bullOBColor,obTransparency),border_color=color.new(bullOBColor,20),text=txt,text_color=bullOBColor,text_size=f_textSize(),text_halign=text.align_right,text_valign=text.align_center)
+        array.push(orderBlocks,OrderBlockZone.new(nextOrderBlockId,1,0,zoneTop,zoneBottom,originBar,originTime,bar_index,time,na,na,newBullPrimaryEpisodeId,newBullPrimaryFVGId,newBullPrimaryScore,newBullPrimaryScope,newBullPrimaryKind,0.0,bx))
+        nextOrderBlockId+=1
+        bullOBCount+=1
+        bullOBEvent:=true
+        f_trimOrderBlocks()
+
+if bearOBTrigger and not na(newBearPrimaryEpisodeId) and not f_hasOrderBlockForEpisode(newBearPrimaryEpisodeId,-1)
+    [originBar,originTime,zoneTop,zoneBottom]=f_findOBOrigin(newBearPrimaryEpisodeId,-1)
+    if not na(originBar) and not na(originTime) and not na(zoneTop) and not na(zoneBottom)
+        string txt=showOBProvenance?"OB · EP"+str.tostring(newBearPrimaryEpisodeId)+" · "+newBearPrimaryKind:"OB"
+        box bx=box.new(originTime,zoneTop,time,zoneBottom,xloc=xloc.bar_time,extend=extend.none,bgcolor=color.new(bearOBColor,obTransparency),border_color=color.new(bearOBColor,20),text=txt,text_color=bearOBColor,text_size=f_textSize(),text_halign=text.align_right,text_valign=text.align_center)
+        array.push(orderBlocks,OrderBlockZone.new(nextOrderBlockId,-1,0,zoneTop,zoneBottom,originBar,originTime,bar_index,time,na,na,newBearPrimaryEpisodeId,newBearPrimaryFVGId,newBearPrimaryScore,newBearPrimaryScope,newBearPrimaryKind,0.0,bx))
+        nextOrderBlockId+=1
+        bearOBCount+=1
+        bearOBEvent:=true
+        f_trimOrderBlocks()
+
+if array.size(orderBlocks)>0
+    for n=0 to array.size(orderBlocks)-1
+        OrderBlockZone z=array.get(orderBlocks,n)
+        float zoneHeight=math.max(z.top-z.bottom,syminfo.mintick)
+
+        if z.state==0
+            float overlapTop=math.min(high,z.top)
+            float overlapBottom=math.max(low,z.bottom)
+            float overlap=math.max(overlapTop-overlapBottom,0.0)
+            float mitigationPct=100.0*overlap/zoneHeight
+            z.maxMitigationPct:=math.max(z.maxMitigationPct,mitigationPct)
+
+            bool bullCloseFailure=z.direction==1 and close<z.bottom
+            bool bearCloseFailure=z.direction==-1 and close>z.top
+            bool bullBodyFailure=z.direction==1 and open<z.bottom and close<z.bottom
+            bool bearBodyFailure=z.direction==-1 and open>z.top and close>z.top
+            bool bullFlipConfirmed=bbFlipMode=="Full body beyond boundary"?bullBodyFailure:bullCloseFailure
+            bool bearFlipConfirmed=bbFlipMode=="Full body beyond boundary"?bearBodyFailure:bearCloseFailure
+            bool breakerQualified=z.direction==1?(bullFlipConfirmed and (not requireBreakerDisplacement or bearDisplacementEvent)):(bearFlipConfirmed and (not requireBreakerDisplacement or bullDisplacementEvent))
+            bool fullWickFill=z.direction==1?low<=z.bottom:high>=z.top
+
+            if breakerQualified
+                z.state:=1
+                if z.direction==1
+                    bearBBEvent:=true
+                    bearBBCount+=1
+                else
+                    bullBBEvent:=true
+                    bullBBCount+=1
+            else if retireOBOnFullWickFill and fullWickFill
+                z.state:=2
+                z.terminalBar:=bar_index
+                z.terminalTime:=time
+                retiredOBBBCount+=1
+
+        else if z.state==1
+            bool bbBull=z.direction==-1
+            bool invalidClose=bbBull?close<z.bottom:close>z.top
+            bool fullTraverse=bbBull?low<=z.bottom:high>=z.top
+            if invalidClose or (retireBBOnFullWickFill and fullTraverse)
+                z.state:=2
+                z.terminalBar:=bar_index
+                z.terminalTime:=time
+                retiredOBBBCount+=1
+
+        bool active=z.state<2
+        bool isOB=z.state==0
+        bool isBB=z.state==1
+        bool visualBull=isOB?z.direction==1:z.direction==-1
+        color c=isBB?(visualBull?bullBBColor:bearBBColor):(visualBull?bullOBColor:bearOBColor)
+        bool visible=active and ((isOB and showOBZones) or (isBB and showBBZones))
+
+        if not na(z.bx)
+            box.set_right(z.bx,active?time:(na(z.terminalTime)?time:z.terminalTime))
+            box.set_bgcolor(z.bx,visible?color.new(c,obTransparency):color.new(c,100))
+            box.set_border_color(z.bx,visible?color.new(c,20):color.new(c,100))
+            string kind=isBB?"BB":"OB"
+            string prov=showOBProvenance?" · EP"+str.tostring(z.episodeId)+" · FVG"+str.tostring(z.fvgId)+" · "+z.structureKind:""
+            box.set_text(z.bx,visible?kind+prov:"")
+            box.set_text_color(z.bx,c)
+            box.set_text_size(z.bx,f_textSize())
+            box.set_text_halign(z.bx,text.align_right)
+            box.set_text_valign(z.bx,text.align_center)
+
+        array.set(orderBlocks,n,z)
+
+// Build normalized downstream view after both POI source engines update.
+f_rebuildUnifiedPOIs()
+
+var string lastInternalEvent="NONE"
+var string lastExternalEvent="NONE"
+var int lastInternalEventBar=na
+var int lastExternalEventBar=na
+var line[] structureLines=array.new_line()
+var label[] structureLabels=array.new_label()
+
+f_structureKind(bool mss,bool choch) =>
+    mss?"MSS":choch?"CHoCH":"BOS"
+
+f_addStructureVisual(bool enabled,int swingTime,float price,string kind,bool bullish) =>
+    if enabled and not na(swingTime) and not na(price)
+        color c=bullish?bullStructureColor:bearStructureColor
+        line ln=line.new(swingTime,price,time,price,xloc=xloc.bar_time,extend=extend.none,color=c,style=kind=="CHoCH"?line.style_dashed:line.style_solid,width=kind=="MSS"?2:1)
+        label lb=label.new(swingTime+(time-swingTime)/2,price,kind,xloc=xloc.bar_time,style=label.style_none,textcolor=c,size=f_textSize())
+        array.push(structureLines,ln)
+        array.push(structureLabels,lb)
+        while array.size(structureLines)>maxStructureEvents
+            line.delete(array.shift(structureLines))
+            label.delete(array.shift(structureLabels))
+
+if iBullBreak
+    string kind=f_structureKind(iBullMSS,iBullCH)
+    f_addStructureVisual(showInternalStructure,iTargetHighTime,iTargetHigh,kind,true)
+    lastInternalEvent:="BULL "+kind
+    lastInternalEventBar:=bar_index
+    iHighWaiting:=false
+    iProtectedLow:=iLow
+    iProtectedLowTime:=iLowTime
+    iTrend:=1
+
+if iBearBreak
+    string kind=f_structureKind(iBearMSS,iBearCH)
+    f_addStructureVisual(showInternalStructure,iTargetLowTime,iTargetLow,kind,false)
+    lastInternalEvent:="BEAR "+kind
+    lastInternalEventBar:=bar_index
+    iLowWaiting:=false
+    iProtectedHigh:=iHigh
+    iProtectedHighTime:=iHighTime
+    iTrend:=-1
+
+if xBullBreak
+    string kind=f_structureKind(xBullMSS,xBullCH)
+    f_addStructureVisual(showExternalStructure,xTargetHighTime,xTargetHigh,kind,true)
+    lastExternalEvent:="BULL "+kind
+    lastExternalEventBar:=bar_index
+    xHighWaiting:=false
+    xProtectedLow:=xLow
+    xProtectedLowTime:=xLowTime
+    xTrend:=1
+
+if xBearBreak
+    string kind=f_structureKind(xBearMSS,xBearCH)
+    f_addStructureVisual(showExternalStructure,xTargetLowTime,xTargetLow,kind,false)
+    lastExternalEvent:="BEAR "+kind
+    lastExternalEventBar:=bar_index
+    xLowWaiting:=false
+    xProtectedHigh:=xHigh
+    xProtectedHighTime:=xHighTime
+    xTrend:=-1
+
+//=============================================================================
+// PREVIOUS D/W/M LIQUIDITY
+// Confirmed previous period values.
+//=============================================================================
+float pdH=request.security(syminfo.tickerid,"D",high[1],lookahead=barmerge.lookahead_on)
+float pdL=request.security(syminfo.tickerid,"D",low[1],lookahead=barmerge.lookahead_on)
+float pwH=request.security(syminfo.tickerid,"W",high[1],lookahead=barmerge.lookahead_on)
+float pwL=request.security(syminfo.tickerid,"W",low[1],lookahead=barmerge.lookahead_on)
+float pmH=request.security(syminfo.tickerid,"M",high[1],lookahead=barmerge.lookahead_on)
+float pmL=request.security(syminfo.tickerid,"M",low[1],lookahead=barmerge.lookahead_on)
+
+bool newD=ta.change(time("D"))!=0
+bool newW=ta.change(time("W"))!=0
+bool newM=ta.change(time("M"))!=0
+
+if (barstate.isfirst or newD) and usePD
+    liquiditySupersedeCount+=f_supersedeSource("PDH")
+    liquiditySupersedeCount+=f_supersedeSource("PDL")
+    if f_registerReference(nextLiquidityId,pdH,true,2,"PREVIOUS_DAY","PDH",bar_index,time)
+        nextLiquidityId+=1
+    if f_registerReference(nextLiquidityId,pdL,false,2,"PREVIOUS_DAY","PDL",bar_index,time)
+        nextLiquidityId+=1
+
+if (barstate.isfirst or newW) and usePW
+    liquiditySupersedeCount+=f_supersedeSource("PWH")
+    liquiditySupersedeCount+=f_supersedeSource("PWL")
+    if f_registerReference(nextLiquidityId,pwH,true,1,"PREVIOUS_WEEK","PWH",bar_index,time)
+        nextLiquidityId+=1
+    if f_registerReference(nextLiquidityId,pwL,false,1,"PREVIOUS_WEEK","PWL",bar_index,time)
+        nextLiquidityId+=1
+
+if (barstate.isfirst or newM) and usePM
+    liquiditySupersedeCount+=f_supersedeSource("PMH")
+    liquiditySupersedeCount+=f_supersedeSource("PML")
+    if f_registerReference(nextLiquidityId,pmH,true,1,"PREVIOUS_MONTH","PMH",bar_index,time)
+        nextLiquidityId+=1
+    if f_registerReference(nextLiquidityId,pmL,false,1,"PREVIOUS_MONTH","PML",bar_index,time)
+        nextLiquidityId+=1
+
+//=============================================================================
+// LIQUIDITY LIFECYCLE / EVENTS
+//=============================================================================
+bool bullLiquiditySweep=false
+bool bearLiquiditySweep=false
+bool bullLiquidityResolution=false
+bool bearLiquidityResolution=false
+string latestSweepSource="NONE"
+int latestSweepTier=na
+float latestSweepPrice=na
+string bullSweepSourceThisBar="NONE"
+string bearSweepSourceThisBar="NONE"
+int bullSweepTierThisBar=na
+int bearSweepTierThisBar=na
+float bullSweepPriceThisBar=na
+float bearSweepPriceThisBar=na
+string latestResolutionSource="NONE"
+int latestResolutionTier=na
+float latestResolutionPrice=na
+
+if array.size(liquidity)>0
+    for n=0 to array.size(liquidity)-1
+        LiquidityLevel q=array.get(liquidity,n)
+
+        if q.state==0
+            bool expired=not na(q.expiryBar) and bar_index>q.expiryBar
+            bool swept=barstate.isconfirmed and (q.buySide?(high>q.price and close<q.price):(low<q.price and close>q.price))
+            bool resolved=barstate.isconfirmed and (q.buySide?close>q.price:close<q.price)
+
+            if swept
+                q.state:=1
+                q.terminalBar:=bar_index
+                q.endTime:=time
+                latestSweepSource:=q.sourceName
+                latestSweepTier:=q.tier
+                latestSweepPrice:=q.price
+                liquiditySweepCount+=1
+                if q.buySide
+                    bearLiquiditySweep:=true
+                    bearSweepSourceThisBar:=q.sourceName
+                    bearSweepTierThisBar:=q.tier
+                    bearSweepPriceThisBar:=q.price
+                else
+                    bullLiquiditySweep:=true
+                    bullSweepSourceThisBar:=q.sourceName
+                    bullSweepTierThisBar:=q.tier
+                    bullSweepPriceThisBar:=q.price
+            else if resolved
+                q.state:=2
+                q.terminalBar:=bar_index
+                q.endTime:=time
+                latestResolutionSource:=q.sourceName
+                latestResolutionTier:=q.tier
+                latestResolutionPrice:=q.price
+                liquidityResolutionCount+=1
+                if q.buySide
+                    bullLiquidityResolution:=true
+                else
+                    bearLiquidityResolution:=true
+            else if expired
+                q.state:=3
+                q.terminalBar:=bar_index
+                q.endTime:=time
+                liquidityExpiryCount+=1
+
+            array.set(liquidity,n,q)
+
+        bool terminal=q.state!=0
+        bool visibleState=q.state==0 or showTerminalLiquidity
+        bool tierVisible=f_tierVisible(q.tier)
+        bool modeVisible=modeFull or modeAnalysis or (modeExecution and q.tier<=2)
+        bool visible=visibleState and tierVisible and modeVisible
+        color base=f_tierColor(q.tier)
+        color c=terminal?terminalColor:base
+        int x2=terminal and not na(q.endTime)?q.endTime:time
+
+        if not na(q.ln)
+            line.set_xy2(q.ln,x2,q.price)
+            line.set_color(q.ln,visible?c:f_hidden(c))
+            line.set_style(q.ln,terminal?line.style_dashed:line.style_solid)
+
+        if not na(q.lb)
+            label.set_xy(q.lb,x2,q.price)
+            string clusterText=q.clusterCount>=2?" · x"+str.tostring(q.clusterCount):""
+            string tierText=modeFull?" · T"+str.tostring(q.tier):""
+            string labelText=showLiquidityLabels and visible?q.sourceName+clusterText+tierText:""
+            label.set_text(q.lb,labelText)
+            label.set_textcolor(q.lb,c)
+
+//=============================================================================
+// REVERSAL SETUP STATE MACHINE
+// State: 0 IDLE, 1 SWEEP, 2 SHIFT/WAITING POI, 3 ARMED, 4 RETEST, 5 ELIGIBLE
+// One independent candidate per direction. Eligibility is binary.
+//=============================================================================
+var int bullREVState=0
+var int bearREVState=0
+
+var int bullREVSweepBar=na
+var int bearREVSweepBar=na
+var string bullREVSweepSource="NONE"
+var string bearREVSweepSource="NONE"
+var int bullREVSweepTier=na
+var int bearREVSweepTier=na
+var float bullREVSweepPrice=na
+var float bearREVSweepPrice=na
+
+var int bullREVShiftBar=na
+var int bearREVShiftBar=na
+var int bullREVEpisodeId=na
+var int bearREVEpisodeId=na
+
+var string bullREVPOIEngine="NONE"
+var string bearREVPOIEngine="NONE"
+var int bullREVPOIId=na
+var int bearREVPOIId=na
+var string bullREVPOIType="NONE"
+var string bearREVPOIType="NONE"
+var float bullREVPOITop=na
+var float bullREVPOIBottom=na
+var float bearREVPOITop=na
+var float bearREVPOIBottom=na
+var int bullREVArmedBar=na
+var int bearREVArmedBar=na
+var int bullREVRetestBar=na
+var int bearREVRetestBar=na
+var int bullREVEligibleBar=na
+var int bearREVEligibleBar=na
+
+var int bullREVEligibleCount=0
+var int bearREVEligibleCount=0
+var int bullREVInvalidationCount=0
+var int bearREVInvalidationCount=0
+var string bullREVShiftScopeUsed="NONE"
+var string bearREVShiftScopeUsed="NONE"
+var string bullREVShiftKindUsed="NONE"
+var string bearREVShiftKindUsed="NONE"
+var int bullREVLastScore=na
+var int bearREVLastScore=na
+var string bullREVLastGrade="—"
+var string bearREVLastGrade="—"
+var string bullREVLastBreakdown="—"
+var string bearREVLastBreakdown="—"
+var label[] revLabels=array.new_label()
+
+bool bullREVEligibleEvent=false
+bool bearREVEligibleEvent=false
+
+// Eligible is an event state. Return to idle on the next confirmed bar.
+if bullREVState==5 and barstate.isconfirmed and bar_index>bullREVEligibleBar
+    bullREVState:=0
+if bearREVState==5 and barstate.isconfirmed and bar_index>bearREVEligibleBar
+    bearREVState:=0
+
+// A fresh same-direction sweep replaces any unfinished candidate.
+if bullLiquiditySweep
+    bullREVState:=1
+    bullREVSweepBar:=bar_index
+    bullREVSweepSource:=bullSweepSourceThisBar
+    bullREVSweepTier:=bullSweepTierThisBar
+    bullREVSweepPrice:=bullSweepPriceThisBar
+    bullREVShiftBar:=na
+    bullREVEpisodeId:=na
+    bullREVPOIEngine:="NONE"
+    bullREVPOIId:=na
+    bullREVPOIType:="NONE"
+    bullREVArmedBar:=na
+    bullREVRetestBar:=na
+
+if bearLiquiditySweep
+    bearREVState:=1
+    bearREVSweepBar:=bar_index
+    bearREVSweepSource:=bearSweepSourceThisBar
+    bearREVSweepTier:=bearSweepTierThisBar
+    bearREVSweepPrice:=bearSweepPriceThisBar
+    bearREVShiftBar:=na
+    bearREVEpisodeId:=na
+    bearREVPOIEngine:="NONE"
+    bearREVPOIId:=na
+    bearREVPOIType:="NONE"
+    bearREVArmedBar:=na
+    bearREVRetestBar:=na
+
+bool bullREVShiftEvent=bullDisplacementEvent and (revShiftScope=="External"?(xBullMSS or xBullCH):(iBullMSS or xBullMSS or iBullCH or xBullCH))
+bool bearREVShiftEvent=bearDisplacementEvent and (revShiftScope=="External"?(xBearMSS or xBearCH):(iBearMSS or xBearMSS or iBearCH or xBearCH))
+
+// Sweep -> displacement + reversal structural shift.
+if bullREVState==1
+    if bar_index-bullREVSweepBar>revSweepToShiftBars
+        bullREVState:=0
+        bullREVInvalidationCount+=1
+    else if bullREVShiftEvent and episodeActive and episodeDirection==1
+        bullREVState:=2
+        bullREVShiftBar:=bar_index
+        bullREVEpisodeId:=episodeId
+        bullREVShiftScopeUsed:=(xBullMSS or xBullCH)?"EXTERNAL":"INTERNAL"
+        bullREVShiftKindUsed:=xBullMSS?"MSS":xBullCH?"CHoCH":iBullMSS?"MSS":"CHoCH"
+
+if bearREVState==1
+    if bar_index-bearREVSweepBar>revSweepToShiftBars
+        bearREVState:=0
+        bearREVInvalidationCount+=1
+    else if bearREVShiftEvent and episodeActive and episodeDirection==-1
+        bearREVState:=2
+        bearREVShiftBar:=bar_index
+        bearREVEpisodeId:=episodeId
+        bearREVShiftScopeUsed:=(xBearMSS or xBearCH)?"EXTERNAL":"INTERNAL"
+        bearREVShiftKindUsed:=xBearMSS?"MSS":xBearCH?"CHoCH":iBearMSS?"MSS":"CHoCH"
+
+// Shift -> same-episode Unified POI.
+if bullREVState==2
+    if bar_index-bullREVShiftBar>revShiftToPOIBars
+        bullREVState:=0
+        bullREVInvalidationCount+=1
+    else
+        int idx=f_findREVPOI(bullREVEpisodeId,1)
+        if idx>=0
+            UnifiedPOI p=array.get(unifiedPOIs,idx)
+            bullREVPOIEngine:=p.sourceEngine
+            bullREVPOIId:=p.sourceId
+            bullREVPOIType:=p.poiType
+            bullREVPOITop:=p.top
+            bullREVPOIBottom:=p.bottom
+            bullREVArmedBar:=bar_index
+            bullREVState:=3
+
+if bearREVState==2
+    if bar_index-bearREVShiftBar>revShiftToPOIBars
+        bearREVState:=0
+        bearREVInvalidationCount+=1
+    else
+        int idx=f_findREVPOI(bearREVEpisodeId,-1)
+        if idx>=0
+            UnifiedPOI p=array.get(unifiedPOIs,idx)
+            bearREVPOIEngine:=p.sourceEngine
+            bearREVPOIId:=p.sourceId
+            bearREVPOIType:=p.poiType
+            bearREVPOITop:=p.top
+            bearREVPOIBottom:=p.bottom
+            bearREVArmedBar:=bar_index
+            bearREVState:=3
+
+// Keep source POI synchronized. A retired or inverted POI invalidates candidate.
+if bullREVState==3 or bullREVState==4
+    int idx=f_findUnifiedPOIByKey(bullREVPOIEngine,bullREVPOIId)
+    bool invalidPOI=idx<0
+    if not invalidPOI
+        UnifiedPOI p=array.get(unifiedPOIs,idx)
+        invalidPOI:=p.direction!=1
+        if not invalidPOI
+            bullREVPOIType:=p.poiType
+            bullREVPOITop:=p.top
+            bullREVPOIBottom:=p.bottom
+
+    bool oppositeBreak=revInvalidateOppositeBreak and (iBearBreak or xBearBreak)
+    bool retestExpired=bar_index-bullREVArmedBar>revPOIToRetestBars
+
+    if invalidPOI or oppositeBreak or retestExpired
+        bullREVState:=0
+        bullREVInvalidationCount+=1
+    else
+        bool touch=bar_index>bullREVArmedBar and low<=bullREVPOITop and high>=bullREVPOIBottom
+        if bullREVState==3 and touch
+            bullREVState:=4
+            bullREVRetestBar:=bar_index
+
+        if bullREVState==4
+            float midpoint=(bullREVPOITop+bullREVPOIBottom)/2.0
+            bool directionalReaction=close>open
+            bool reaction=revReactionMode=="Midpoint reclaim"?directionalReaction and close>midpoint:directionalReaction
+            if barstate.isconfirmed and reaction
+                bullREVState:=5
+                bullREVEligibleBar:=bar_index
+                bullREVEligibleCount+=1
+                bullREVEligibleEvent:=true
+                int pidx=f_findUnifiedPOIByKey(bullREVPOIEngine,bullREVPOIId)
+                int dspPts=f_displacementQualityPoints(bullREVEpisodeId)
+                int strPts=f_structureQualityPoints("REV",bullREVShiftScopeUsed,bullREVShiftKindUsed)
+                int poiPts=pidx>=0?f_poiQualityPoints(array.get(unifiedPOIs,pidx)):0
+                int mitPts=pidx>=0?f_mitigationQualityPoints(array.get(unifiedPOIs,pidx).mitigationPct):0
+                int ctxPts=f_revContextPoints(bullREVSweepTier)
+                bullREVLastScore:=math.min(dspPts+strPts+poiPts+mitPts+ctxPts,100)
+                bullREVLastGrade:=f_qualityGrade(bullREVLastScore)
+                bullREVLastBreakdown:="D"+str.tostring(dspPts)+" S"+str.tostring(strPts)+" P"+str.tostring(poiPts)+" M"+str.tostring(mitPts)+" C"+str.tostring(ctxPts)
+                if showREVEligibilityMarkers and not modeExecution
+                    string qtxt=showQualityInMarkers?" · Q"+str.tostring(bullREVLastScore)+" "+bullREVLastGrade:""
+                    label lb=label.new(bar_index,low,"REV ↑ · "+bullREVPOIType+"#"+str.tostring(bullREVPOIId)+qtxt,style=label.style_none,textcolor=bullREVColor,size=f_textSize())
+                    array.push(revLabels,lb)
+
+if bearREVState==3 or bearREVState==4
+    int idx=f_findUnifiedPOIByKey(bearREVPOIEngine,bearREVPOIId)
+    bool invalidPOI=idx<0
+    if not invalidPOI
+        UnifiedPOI p=array.get(unifiedPOIs,idx)
+        invalidPOI:=p.direction!=-1
+        if not invalidPOI
+            bearREVPOIType:=p.poiType
+            bearREVPOITop:=p.top
+            bearREVPOIBottom:=p.bottom
+
+    bool oppositeBreak=revInvalidateOppositeBreak and (iBullBreak or xBullBreak)
+    bool retestExpired=bar_index-bearREVArmedBar>revPOIToRetestBars
+
+    if invalidPOI or oppositeBreak or retestExpired
+        bearREVState:=0
+        bearREVInvalidationCount+=1
+    else
+        bool touch=bar_index>bearREVArmedBar and high>=bearREVPOIBottom and low<=bearREVPOITop
+        if bearREVState==3 and touch
+            bearREVState:=4
+            bearREVRetestBar:=bar_index
+
+        if bearREVState==4
+            float midpoint=(bearREVPOITop+bearREVPOIBottom)/2.0
+            bool directionalReaction=close<open
+            bool reaction=revReactionMode=="Midpoint reclaim"?directionalReaction and close<midpoint:directionalReaction
+            if barstate.isconfirmed and reaction
+                bearREVState:=5
+                bearREVEligibleBar:=bar_index
+                bearREVEligibleCount+=1
+                bearREVEligibleEvent:=true
+                int pidx=f_findUnifiedPOIByKey(bearREVPOIEngine,bearREVPOIId)
+                int dspPts=f_displacementQualityPoints(bearREVEpisodeId)
+                int strPts=f_structureQualityPoints("REV",bearREVShiftScopeUsed,bearREVShiftKindUsed)
+                int poiPts=pidx>=0?f_poiQualityPoints(array.get(unifiedPOIs,pidx)):0
+                int mitPts=pidx>=0?f_mitigationQualityPoints(array.get(unifiedPOIs,pidx).mitigationPct):0
+                int ctxPts=f_revContextPoints(bearREVSweepTier)
+                bearREVLastScore:=math.min(dspPts+strPts+poiPts+mitPts+ctxPts,100)
+                bearREVLastGrade:=f_qualityGrade(bearREVLastScore)
+                bearREVLastBreakdown:="D"+str.tostring(dspPts)+" S"+str.tostring(strPts)+" P"+str.tostring(poiPts)+" M"+str.tostring(mitPts)+" C"+str.tostring(ctxPts)
+                if showREVEligibilityMarkers and not modeExecution
+                    string qtxt=showQualityInMarkers?" · Q"+str.tostring(bearREVLastScore)+" "+bearREVLastGrade:""
+                    label lb=label.new(bar_index,high,"REV ↓ · "+bearREVPOIType+"#"+str.tostring(bearREVPOIId)+qtxt,style=label.style_none,textcolor=bearREVColor,size=f_textSize())
+                    array.push(revLabels,lb)
+
+while array.size(revLabels)>maxREVMarkers
+    label.delete(array.shift(revLabels))
+
+f_revStateText(int state) =>
+    state==1?"SWEEP":state==2?"SHIFT":state==3?"ARMED":state==4?"RETEST":state==5?"ELIGIBLE":"IDLE"
+
+//=============================================================================
+// CONTINUATION SETUP STATE MACHINE
+// State: 0 IDLE, 1 IMPULSE/WAITING POI, 2 ARMED, 3 RETEST, 4 ELIGIBLE.
+// Trend must pre-exist the qualifying impulse. CHoCH/MSS never starts CONT.
+//=============================================================================
+var int bullCONTState=0
+var int bearCONTState=0
+var int bullCONTImpulseBar=na
+var int bearCONTImpulseBar=na
+var int bullCONTEpisodeId=na
+var int bearCONTEpisodeId=na
+
+var string bullCONTPOIEngine="NONE"
+var string bearCONTPOIEngine="NONE"
+var int bullCONTPOIId=na
+var int bearCONTPOIId=na
+var string bullCONTPOIType="NONE"
+var string bearCONTPOIType="NONE"
+var float bullCONTPOITop=na
+var float bullCONTPOIBottom=na
+var float bearCONTPOITop=na
+var float bearCONTPOIBottom=na
+var int bullCONTArmedBar=na
+var int bearCONTArmedBar=na
+var int bullCONTRetestBar=na
+var int bearCONTRetestBar=na
+var int bullCONTEligibleBar=na
+var int bearCONTEligibleBar=na
+
+var int bullCONTEligibleCount=0
+var int bearCONTEligibleCount=0
+var int bullCONTInvalidationCount=0
+var int bearCONTInvalidationCount=0
+var string bullCONTBOSScopeUsed="NONE"
+var string bearCONTBOSScopeUsed="NONE"
+var int bullCONTContextPts=0
+var int bearCONTContextPts=0
+var int bullCONTLastScore=na
+var int bearCONTLastScore=na
+var string bullCONTLastGrade="—"
+var string bearCONTLastGrade="—"
+var string bullCONTLastBreakdown="—"
+var string bearCONTLastBreakdown="—"
+var label[] contLabels=array.new_label()
+
+bool bullCONTEligibleEvent=false
+bool bearCONTEligibleEvent=false
+
+if bullCONTState==4 and barstate.isconfirmed and bar_index>bullCONTEligibleBar
+    bullCONTState:=0
+if bearCONTState==4 and barstate.isconfirmed and bar_index>bearCONTEligibleBar
+    bearCONTState:=0
+
+bool bullTrendPreExisting=contTrendScope=="External"?oldXTrend==1:(oldXTrend==1 and oldITrend==1)
+bool bearTrendPreExisting=contTrendScope=="External"?oldXTrend==-1:(oldXTrend==-1 and oldITrend==-1)
+
+bool bullSameDirectionBOS=contBOSScope=="External"?xBullBOS:(iBullBOS or xBullBOS)
+bool bearSameDirectionBOS=contBOSScope=="External"?xBearBOS:(iBearBOS or xBearBOS)
+
+bool bullCONTImpulseEvent=barstate.isconfirmed and bullTrendPreExisting and bullDisplacementEvent and episodeActive and episodeDirection==1 and not (iBullCH or xBullCH or iBullMSS or xBullMSS) and (not contRequireBOS or bullSameDirectionBOS)
+bool bearCONTImpulseEvent=barstate.isconfirmed and bearTrendPreExisting and bearDisplacementEvent and episodeActive and episodeDirection==-1 and not (iBearCH or xBearCH or iBearMSS or xBearMSS) and (not contRequireBOS or bearSameDirectionBOS)
+
+// A fresh qualifying continuation impulse replaces an unfinished candidate.
+if bullCONTImpulseEvent
+    bullCONTState:=1
+    bullCONTImpulseBar:=bar_index
+    bullCONTEpisodeId:=episodeId
+    bullCONTBOSScopeUsed:=xBullBOS?"EXTERNAL":iBullBOS?"INTERNAL":"NONE"
+    bullCONTContextPts:=oldXTrend==1 and oldITrend==1?15:11
+    bullCONTPOIEngine:="NONE"
+    bullCONTPOIId:=na
+    bullCONTPOIType:="NONE"
+    bullCONTArmedBar:=na
+    bullCONTRetestBar:=na
+
+if bearCONTImpulseEvent
+    bearCONTState:=1
+    bearCONTImpulseBar:=bar_index
+    bearCONTEpisodeId:=episodeId
+    bearCONTBOSScopeUsed:=xBearBOS?"EXTERNAL":iBearBOS?"INTERNAL":"NONE"
+    bearCONTContextPts:=oldXTrend==-1 and oldITrend==-1?15:11
+    bearCONTPOIEngine:="NONE"
+    bearCONTPOIId:=na
+    bearCONTPOIType:="NONE"
+    bearCONTArmedBar:=na
+    bearCONTRetestBar:=na
+
+// Expansion -> same-episode primary Unified POI.
+if bullCONTState==1
+    if bar_index-bullCONTImpulseBar>contImpulseToPOIBars
+        bullCONTState:=0
+        bullCONTInvalidationCount+=1
+    else
+        int idx=f_findCONTPOI(bullCONTEpisodeId,1)
+        if idx>=0
+            UnifiedPOI p=array.get(unifiedPOIs,idx)
+            bullCONTPOIEngine:=p.sourceEngine
+            bullCONTPOIId:=p.sourceId
+            bullCONTPOIType:=p.poiType
+            bullCONTPOITop:=p.top
+            bullCONTPOIBottom:=p.bottom
+            bullCONTArmedBar:=bar_index
+            bullCONTState:=2
+
+if bearCONTState==1
+    if bar_index-bearCONTImpulseBar>contImpulseToPOIBars
+        bearCONTState:=0
+        bearCONTInvalidationCount+=1
+    else
+        int idx=f_findCONTPOI(bearCONTEpisodeId,-1)
+        if idx>=0
+            UnifiedPOI p=array.get(unifiedPOIs,idx)
+            bearCONTPOIEngine:=p.sourceEngine
+            bearCONTPOIId:=p.sourceId
+            bearCONTPOIType:=p.poiType
+            bearCONTPOITop:=p.top
+            bearCONTPOIBottom:=p.bottom
+            bearCONTArmedBar:=bar_index
+            bearCONTState:=2
+
+// Pullback and reaction. Source POI must remain active with same direction.
+if bullCONTState==2 or bullCONTState==3
+    int idx=f_findUnifiedPOIByKey(bullCONTPOIEngine,bullCONTPOIId)
+    bool invalidPOI=idx<0
+    if not invalidPOI
+        UnifiedPOI p=array.get(unifiedPOIs,idx)
+        invalidPOI:=p.direction!=1
+        if not invalidPOI
+            bullCONTPOIType:=p.poiType
+            bullCONTPOITop:=p.top
+            bullCONTPOIBottom:=p.bottom
+
+    bool oppositeShift=contInvalidateOppositeShift and (iBearCH or xBearCH or iBearMSS or xBearMSS)
+    bool trendLost=contTrendScope=="External"?xTrend!=1:(xTrend!=1 or iTrend!=1)
+    bool retestExpired=bar_index-bullCONTArmedBar>contPOIToRetestBars
+
+    if invalidPOI or oppositeShift or trendLost or retestExpired
+        bullCONTState:=0
+        bullCONTInvalidationCount+=1
+    else
+        bool touch=bar_index>bullCONTArmedBar and low<=bullCONTPOITop and high>=bullCONTPOIBottom
+        if bullCONTState==2 and touch
+            bullCONTState:=3
+            bullCONTRetestBar:=bar_index
+
+        if bullCONTState==3
+            float midpoint=(bullCONTPOITop+bullCONTPOIBottom)/2.0
+            bool directionalReaction=close>open
+            bool reaction=contReactionMode=="Midpoint reclaim"?directionalReaction and close>midpoint:directionalReaction
+            if barstate.isconfirmed and reaction
+                bullCONTState:=4
+                bullCONTEligibleBar:=bar_index
+                bullCONTEligibleCount+=1
+                bullCONTEligibleEvent:=true
+                int pidx=f_findUnifiedPOIByKey(bullCONTPOIEngine,bullCONTPOIId)
+                int dspPts=f_displacementQualityPoints(bullCONTEpisodeId)
+                int strPts=f_structureQualityPoints("CONT",bullCONTBOSScopeUsed,"BOS")
+                int poiPts=pidx>=0?f_poiQualityPoints(array.get(unifiedPOIs,pidx)):0
+                int mitPts=pidx>=0?f_mitigationQualityPoints(array.get(unifiedPOIs,pidx).mitigationPct):0
+                int ctxPts=bullCONTContextPts
+                bullCONTLastScore:=math.min(dspPts+strPts+poiPts+mitPts+ctxPts,100)
+                bullCONTLastGrade:=f_qualityGrade(bullCONTLastScore)
+                bullCONTLastBreakdown:="D"+str.tostring(dspPts)+" S"+str.tostring(strPts)+" P"+str.tostring(poiPts)+" M"+str.tostring(mitPts)+" C"+str.tostring(ctxPts)
+                if showCONTEligibilityMarkers and not modeExecution
+                    string qtxt=showQualityInMarkers?" · Q"+str.tostring(bullCONTLastScore)+" "+bullCONTLastGrade:""
+                    label lb=label.new(bar_index,low,"CONT ↑ · "+bullCONTPOIType+"#"+str.tostring(bullCONTPOIId)+qtxt,style=label.style_none,textcolor=bullCONTColor,size=f_textSize())
+                    array.push(contLabels,lb)
+
+if bearCONTState==2 or bearCONTState==3
+    int idx=f_findUnifiedPOIByKey(bearCONTPOIEngine,bearCONTPOIId)
+    bool invalidPOI=idx<0
+    if not invalidPOI
+        UnifiedPOI p=array.get(unifiedPOIs,idx)
+        invalidPOI:=p.direction!=-1
+        if not invalidPOI
+            bearCONTPOIType:=p.poiType
+            bearCONTPOITop:=p.top
+            bearCONTPOIBottom:=p.bottom
+
+    bool oppositeShift=contInvalidateOppositeShift and (iBullCH or xBullCH or iBullMSS or xBullMSS)
+    bool trendLost=contTrendScope=="External"?xTrend!=-1:(xTrend!=-1 or iTrend!=-1)
+    bool retestExpired=bar_index-bearCONTArmedBar>contPOIToRetestBars
+
+    if invalidPOI or oppositeShift or trendLost or retestExpired
+        bearCONTState:=0
+        bearCONTInvalidationCount+=1
+    else
+        bool touch=bar_index>bearCONTArmedBar and high>=bearCONTPOIBottom and low<=bearCONTPOITop
+        if bearCONTState==2 and touch
+            bearCONTState:=3
+            bearCONTRetestBar:=bar_index
+
+        if bearCONTState==3
+            float midpoint=(bearCONTPOITop+bearCONTPOIBottom)/2.0
+            bool directionalReaction=close<open
+            bool reaction=contReactionMode=="Midpoint reclaim"?directionalReaction and close<midpoint:directionalReaction
+            if barstate.isconfirmed and reaction
+                bearCONTState:=4
+                bearCONTEligibleBar:=bar_index
+                bearCONTEligibleCount+=1
+                bearCONTEligibleEvent:=true
+                int pidx=f_findUnifiedPOIByKey(bearCONTPOIEngine,bearCONTPOIId)
+                int dspPts=f_displacementQualityPoints(bearCONTEpisodeId)
+                int strPts=f_structureQualityPoints("CONT",bearCONTBOSScopeUsed,"BOS")
+                int poiPts=pidx>=0?f_poiQualityPoints(array.get(unifiedPOIs,pidx)):0
+                int mitPts=pidx>=0?f_mitigationQualityPoints(array.get(unifiedPOIs,pidx).mitigationPct):0
+                int ctxPts=bearCONTContextPts
+                bearCONTLastScore:=math.min(dspPts+strPts+poiPts+mitPts+ctxPts,100)
+                bearCONTLastGrade:=f_qualityGrade(bearCONTLastScore)
+                bearCONTLastBreakdown:="D"+str.tostring(dspPts)+" S"+str.tostring(strPts)+" P"+str.tostring(poiPts)+" M"+str.tostring(mitPts)+" C"+str.tostring(ctxPts)
+                if showCONTEligibilityMarkers and not modeExecution
+                    string qtxt=showQualityInMarkers?" · Q"+str.tostring(bearCONTLastScore)+" "+bearCONTLastGrade:""
+                    label lb=label.new(bar_index,high,"CONT ↓ · "+bearCONTPOIType+"#"+str.tostring(bearCONTPOIId)+qtxt,style=label.style_none,textcolor=bearCONTColor,size=f_textSize())
+                    array.push(contLabels,lb)
+
+while array.size(contLabels)>maxCONTMarkers
+    label.delete(array.shift(contLabels))
+
+f_contStateText(int state) =>
+    state==1?"IMPULSE":state==2?"ARMED":state==3?"RETEST":state==4?"ELIGIBLE":"IDLE"
+
+//=============================================================================
+// SIGNAL ENGINE
+// Eligibility event + score threshold + duplicate/cooldown suppression.
+// This layer does not mutate REV/CONT setup state or quality.
+//=============================================================================
+bool bullREVSignal=false
+bool bearREVSignal=false
+bool bullCONTSignal=false
+bool bearCONTSignal=false
+
+bool bullREVQualityOK=enableREVSignals and bullREVEligibleEvent and not na(bullREVLastScore) and bullREVLastScore>=minREVSignalScore
+bool bearREVQualityOK=enableREVSignals and bearREVEligibleEvent and not na(bearREVLastScore) and bearREVLastScore>=minREVSignalScore
+bool bullCONTQualityOK=enableCONTSignals and bullCONTEligibleEvent and not na(bullCONTLastScore) and bullCONTLastScore>=minCONTSignalScore
+bool bearCONTQualityOK=enableCONTSignals and bearCONTEligibleEvent and not na(bearCONTLastScore) and bearCONTLastScore>=minCONTSignalScore
+
+bool bullREVDuplicate=bullREVEligibleEvent and f_signalDuplicate("REV",bullREVEpisodeId,bullREVPOIEngine,bullREVPOIId)
+bool bearREVDuplicate=bearREVEligibleEvent and f_signalDuplicate("REV",bearREVEpisodeId,bearREVPOIEngine,bearREVPOIId)
+bool bullCONTDuplicate=bullCONTEligibleEvent and f_signalDuplicate("CONT",bullCONTEpisodeId,bullCONTPOIEngine,bullCONTPOIId)
+bool bearCONTDuplicate=bearCONTEligibleEvent and f_signalDuplicate("CONT",bearCONTEpisodeId,bearCONTPOIEngine,bearCONTPOIId)
+
+bool bullCooldownOK=f_signalCooldownOK(1)
+bool bearCooldownOK=f_signalCooldownOK(-1)
+
+if bullREVEligibleEvent and enableREVSignals
+    if not bullREVQualityOK
+        signalRejectedQuality+=1
+    else if bullREVDuplicate
+        signalRejectedDuplicate+=1
+    else if not bullCooldownOK
+        signalRejectedCooldown+=1
+    else
+        bullREVSignal:=true
+        bullSignalCount+=1
+        revSignalCount+=1
+        lastBullSignalBar:=bar_index
+        lastSignalText:="REV BULL · Q"+str.tostring(bullREVLastScore)+" "+bullREVLastGrade+" · EP"+str.tostring(bullREVEpisodeId)+" · POI"+str.tostring(bullREVPOIId)
+        array.push(signalHistory,SignalRecord.new("REV",1,bullREVEpisodeId,bullREVPOIEngine,bullREVPOIId,bar_index,bullREVLastScore))
+        label sigLb=f_signalEntryMarker(1,"REV",bullREVLastScore,bullREVLastGrade)
+        if not na(sigLb)
+            array.push(signalLabels,sigLb)
+
+if bearREVEligibleEvent and enableREVSignals
+    if not bearREVQualityOK
+        signalRejectedQuality+=1
+    else if bearREVDuplicate
+        signalRejectedDuplicate+=1
+    else if not bearCooldownOK
+        signalRejectedCooldown+=1
+    else
+        bearREVSignal:=true
+        bearSignalCount+=1
+        revSignalCount+=1
+        lastBearSignalBar:=bar_index
+        lastSignalText:="REV BEAR · Q"+str.tostring(bearREVLastScore)+" "+bearREVLastGrade+" · EP"+str.tostring(bearREVEpisodeId)+" · POI"+str.tostring(bearREVPOIId)
+        array.push(signalHistory,SignalRecord.new("REV",-1,bearREVEpisodeId,bearREVPOIEngine,bearREVPOIId,bar_index,bearREVLastScore))
+        label sigLb=f_signalEntryMarker(-1,"REV",bearREVLastScore,bearREVLastGrade)
+        if not na(sigLb)
+            array.push(signalLabels,sigLb)
+
+if bullCONTEligibleEvent and enableCONTSignals
+    if not bullCONTQualityOK
+        signalRejectedQuality+=1
+    else if bullCONTDuplicate
+        signalRejectedDuplicate+=1
+    else if not bullCooldownOK
+        signalRejectedCooldown+=1
+    else
+        bullCONTSignal:=true
+        bullSignalCount+=1
+        contSignalCount+=1
+        lastBullSignalBar:=bar_index
+        lastSignalText:="CONT BULL · Q"+str.tostring(bullCONTLastScore)+" "+bullCONTLastGrade+" · EP"+str.tostring(bullCONTEpisodeId)+" · POI"+str.tostring(bullCONTPOIId)
+        array.push(signalHistory,SignalRecord.new("CONT",1,bullCONTEpisodeId,bullCONTPOIEngine,bullCONTPOIId,bar_index,bullCONTLastScore))
+        label sigLb=f_signalEntryMarker(1,"CONT",bullCONTLastScore,bullCONTLastGrade)
+        if not na(sigLb)
+            array.push(signalLabels,sigLb)
+
+if bearCONTEligibleEvent and enableCONTSignals
+    if not bearCONTQualityOK
+        signalRejectedQuality+=1
+    else if bearCONTDuplicate
+        signalRejectedDuplicate+=1
+    else if not bearCooldownOK
+        signalRejectedCooldown+=1
+    else
+        bearCONTSignal:=true
+        bearSignalCount+=1
+        contSignalCount+=1
+        lastBearSignalBar:=bar_index
+        lastSignalText:="CONT BEAR · Q"+str.tostring(bearCONTLastScore)+" "+bearCONTLastGrade+" · EP"+str.tostring(bearCONTEpisodeId)+" · POI"+str.tostring(bearCONTPOIId)
+        array.push(signalHistory,SignalRecord.new("CONT",-1,bearCONTEpisodeId,bearCONTPOIEngine,bearCONTPOIId,bar_index,bearCONTLastScore))
+        label sigLb=f_signalEntryMarker(-1,"CONT",bearCONTLastScore,bearCONTLastGrade)
+        if not na(sigLb)
+            array.push(signalLabels,sigLb)
+
+while array.size(signalHistory)>200
+    array.shift(signalHistory)
+
+while array.size(signalLabels)>maxSignalMarkers
+    label.delete(array.shift(signalLabels))
+
+//=============================================================================
+// MISSED ENTRY / PLUTUS REACTION AUDIT
+// Reaction geometry adapted from PLUTUS P09.2.
+// Diagnostic only: no REV/CONT/P09 state is mutated.
+//=============================================================================
+var string bullAuditEngine="NONE"
+var string bearAuditEngine="NONE"
+var int bullAuditPOIId=na
+var int bearAuditPOIId=na
+var string bullAuditPOIType="NONE"
+var string bearAuditPOIType="NONE"
+var string bullAuditClass="NONE"
+var string bearAuditClass="NONE"
+var string bullAuditFamily="NONE"
+var string bearAuditFamily="NONE"
+var string bullAuditKind="NONE"   // TRUE_MISS | EARLY
+var string bearAuditKind="NONE"
+var int bullAuditStateAtArm=0
+var int bearAuditStateAtArm=0
+var float bullAuditTop=na
+var float bullAuditBottom=na
+var float bearAuditTop=na
+var float bearAuditBottom=na
+var int bullAuditStart=na
+var int bearAuditStart=na
+var int bullAuditDeadline=na
+var int bearAuditDeadline=na
+
+var int bullAuditConfirmCount=0
+var int bearAuditConfirmCount=0
+var int bullMissedEntryCount=0
+var int bearMissedEntryCount=0
+var int arthaCapturedAuditCount=0
+var int bullEarlyOpportunityCount=0
+var int bearEarlyOpportunityCount=0
+var int rawReactionCount=0
+var int lastBullAuditContextBar=na
+var int lastBearAuditContextBar=na
+var int lastBullREVShiftContextBar=na
+var int lastBearREVShiftContextBar=na
+var string lastAuditKind="NONE"
+var string lastAuditClass="NONE"
+var string lastAuditFamily="NONE"
+var string lastAuditReason="NONE"
+var label[] missedEntryLabels=array.new_label()
+
+bool bullMissedEntryEvent=false
+bool bearMissedEntryEvent=false
+
+// Recent directional causal context for EARLY opportunities.
+// CONT context tracks directional expansion/BOS.
+// REV context tracks actual same-direction CHoCH/MSS, not merely a liquidity sweep.
+if bullDisplacementEvent or iBullBOS or xBullBOS
+    lastBullAuditContextBar:=bar_index
+if bearDisplacementEvent or iBearBOS or xBearBOS
+    lastBearAuditContextBar:=bar_index
+if iBullCH or xBullCH or iBullMSS or xBullMSS
+    lastBullREVShiftContextBar:=bar_index
+if iBearCH or xBearCH or iBearMSS or xBearMSS
+    lastBearREVShiftContextBar:=bar_index
+
+[bullInteractionIdx,bullInteractionClass]=f_auditInteractionPOI(1)
+[bearInteractionIdx,bearInteractionClass]=f_auditInteractionPOI(-1)
+
+bool bullAuditPending=not na(bullAuditPOIId)
+bool bearAuditPending=not na(bearAuditPOIId)
+
+// Arm interaction-first. One pending reaction per direction.
+if auditEnabled and bullInteractionIdx>=0 and not bullAuditPending
+    UnifiedPOI p=array.get(unifiedPOIs,bullInteractionIdx)
+    bool activeREV=bullREVState>0
+    bool activeCONT=bullCONTState>0
+    bool bullContextFresh=not na(lastBullAuditContextBar) and bar_index-lastBullAuditContextBar<=auditContextBars
+    bool bullContextDominant=bullContextFresh and (na(lastBearAuditContextBar) or lastBullAuditContextBar>lastBearAuditContextBar)
+    bool recentREV=not na(lastBullREVShiftContextBar) and bar_index-lastBullREVShiftContextBar<=auditContextBars and (na(lastBearREVShiftContextBar) or lastBullREVShiftContextBar>lastBearREVShiftContextBar)
+    bool recentCONT=xTrend==1 and bullContextDominant
+    string fam=activeREV?"REV":activeCONT?"CONT":recentREV?"REV":recentCONT?"CONT":"NONE"
+    string kind=activeREV or activeCONT?"TRUE_MISS":fam!="NONE"?"EARLY":"RAW"
+    if kind=="RAW"
+        rawReactionCount+=1
+    else
+        bullAuditEngine:=p.sourceEngine
+        bullAuditPOIId:=p.sourceId
+        bullAuditPOIType:=p.poiType
+        bullAuditClass:=bullInteractionClass
+        bullAuditFamily:=fam
+        bullAuditKind:=kind
+        bullAuditStateAtArm:=fam=="REV"?bullREVState:bullCONTState
+        bullAuditTop:=p.top
+        bullAuditBottom:=p.bottom
+        bullAuditStart:=bar_index
+        bullAuditDeadline:=bar_index+auditConfirmBars-1
+
+if auditEnabled and bearInteractionIdx>=0 and not bearAuditPending
+    UnifiedPOI p=array.get(unifiedPOIs,bearInteractionIdx)
+    bool activeREV=bearREVState>0
+    bool activeCONT=bearCONTState>0
+    bool bearContextFresh=not na(lastBearAuditContextBar) and bar_index-lastBearAuditContextBar<=auditContextBars
+    bool bearContextDominant=bearContextFresh and (na(lastBullAuditContextBar) or lastBearAuditContextBar>lastBullAuditContextBar)
+    bool recentREV=not na(lastBearREVShiftContextBar) and bar_index-lastBearREVShiftContextBar<=auditContextBars and (na(lastBullREVShiftContextBar) or lastBearREVShiftContextBar>lastBullREVShiftContextBar)
+    bool recentCONT=xTrend==-1 and bearContextDominant
+    string fam=activeREV?"REV":activeCONT?"CONT":recentREV?"REV":recentCONT?"CONT":"NONE"
+    string kind=activeREV or activeCONT?"TRUE_MISS":fam!="NONE"?"EARLY":"RAW"
+    if kind=="RAW"
+        rawReactionCount+=1
+    else
+        bearAuditEngine:=p.sourceEngine
+        bearAuditPOIId:=p.sourceId
+        bearAuditPOIType:=p.poiType
+        bearAuditClass:=bearInteractionClass
+        bearAuditFamily:=fam
+        bearAuditKind:=kind
+        bearAuditStateAtArm:=fam=="REV"?bearREVState:bearCONTState
+        bearAuditTop:=p.top
+        bearAuditBottom:=p.bottom
+        bearAuditStart:=bar_index
+        bearAuditDeadline:=bar_index+auditConfirmBars-1
+
+// Bull confirmation / expiration.
+if not na(bullAuditPOIId)
+    int liveIdx=f_findUnifiedPOIByKey(bullAuditEngine,bullAuditPOIId)
+    bool stillValid=liveIdx>=0 and array.get(unifiedPOIs,liveIdx).direction==1
+    if stillValid
+        UnifiedPOI live=array.get(unifiedPOIs,liveIdx)
+        bullAuditTop:=live.top
+        bullAuditBottom:=live.bottom
+    bool timingOK=bar_index<=bullAuditDeadline and (auditAllowSameBar or bar_index>bullAuditStart)
+    bool confirmed=stillValid and timingOK and barstate.isconfirmed and f_auditCloseConfirmed(1,bullAuditTop,bullAuditBottom,bullAuditClass)
+
+    if confirmed
+        bullAuditConfirmCount+=1
+        bool eligibleCaptured=(not na(bullREVEligibleBar) and bullREVEligibleBar>=bullAuditStart and bullREVEligibleBar<=bar_index) or (not na(bullCONTEligibleBar) and bullCONTEligibleBar>=bullAuditStart and bullCONTEligibleBar<=bar_index)
+        bool signalCaptured=not na(lastBullSignalBar) and lastBullSignalBar>=bullAuditStart and lastBullSignalBar<=bar_index
+        bool captured=eligibleCaptured or signalCaptured
+        if captured
+            arthaCapturedAuditCount+=1
+        else if bullAuditKind=="TRUE_MISS"
+            bullMissedEntryCount+=1
+            bullMissedEntryEvent:=true
+            string reason=bullAuditFamily=="REV"?f_auditREVReason(bullAuditStateAtArm):f_auditCONTReason(bullAuditStateAtArm)
+            lastAuditKind:="TRUE_MISS"
+            lastAuditClass:=bullAuditClass
+            lastAuditFamily:=bullAuditFamily
+            lastAuditReason:=reason
+            if showMissedEntryMarkers
+                string txt="MISS "+bullAuditFamily+" · "+bullAuditClass+"\n"+bullAuditPOIType+"#"+str.tostring(bullAuditPOIId)+" · "+reason
+                label lb=label.new(bar_index,low,txt,style=label.style_label_up,color=color.new(missedEntryColor,10),textcolor=color.white,size=size.small)
+                array.push(missedEntryLabels,lb)
+        else
+            bullEarlyOpportunityCount+=1
+            lastAuditKind:="EARLY"
+            lastAuditClass:=bullAuditClass
+            lastAuditFamily:=bullAuditFamily
+            lastAuditReason:="NO_ACTIVE_CANDIDATE"
+            if showEarlyOpportunityMarkers
+                label lb=label.new(bar_index,low,"▲",style=label.style_none,textcolor=missedEntryColor,size=size.small)
+                array.push(missedEntryLabels,lb)
+        bullAuditPOIId:=na
+        bullAuditKind:="NONE"
+        bullAuditStateAtArm:=0
+    else if not stillValid or bar_index>bullAuditDeadline
+        bullAuditPOIId:=na
+        bullAuditKind:="NONE"
+        bullAuditStateAtArm:=0
+
+// Bear confirmation / expiration.
+if not na(bearAuditPOIId)
+    int liveIdx=f_findUnifiedPOIByKey(bearAuditEngine,bearAuditPOIId)
+    bool stillValid=liveIdx>=0 and array.get(unifiedPOIs,liveIdx).direction==-1
+    if stillValid
+        UnifiedPOI live=array.get(unifiedPOIs,liveIdx)
+        bearAuditTop:=live.top
+        bearAuditBottom:=live.bottom
+    bool timingOK=bar_index<=bearAuditDeadline and (auditAllowSameBar or bar_index>bearAuditStart)
+    bool confirmed=stillValid and timingOK and barstate.isconfirmed and f_auditCloseConfirmed(-1,bearAuditTop,bearAuditBottom,bearAuditClass)
+
+    if confirmed
+        bearAuditConfirmCount+=1
+        bool eligibleCaptured=(not na(bearREVEligibleBar) and bearREVEligibleBar>=bearAuditStart and bearREVEligibleBar<=bar_index) or (not na(bearCONTEligibleBar) and bearCONTEligibleBar>=bearAuditStart and bearCONTEligibleBar<=bar_index)
+        bool signalCaptured=not na(lastBearSignalBar) and lastBearSignalBar>=bearAuditStart and lastBearSignalBar<=bar_index
+        bool captured=eligibleCaptured or signalCaptured
+        if captured
+            arthaCapturedAuditCount+=1
+        else if bearAuditKind=="TRUE_MISS"
+            bearMissedEntryCount+=1
+            bearMissedEntryEvent:=true
+            string reason=bearAuditFamily=="REV"?f_auditREVReason(bearAuditStateAtArm):f_auditCONTReason(bearAuditStateAtArm)
+            lastAuditKind:="TRUE_MISS"
+            lastAuditClass:=bearAuditClass
+            lastAuditFamily:=bearAuditFamily
+            lastAuditReason:=reason
+            if showMissedEntryMarkers
+                string txt="MISS "+bearAuditFamily+" · "+bearAuditClass+"\n"+bearAuditPOIType+"#"+str.tostring(bearAuditPOIId)+" · "+reason
+                label lb=label.new(bar_index,high,txt,style=label.style_label_down,color=color.new(missedEntryColor,10),textcolor=color.white,size=size.small)
+                array.push(missedEntryLabels,lb)
+        else
+            bearEarlyOpportunityCount+=1
+            lastAuditKind:="EARLY"
+            lastAuditClass:=bearAuditClass
+            lastAuditFamily:=bearAuditFamily
+            lastAuditReason:="NO_ACTIVE_CANDIDATE"
+            if showEarlyOpportunityMarkers
+                label lb=label.new(bar_index,high,"▼",style=label.style_none,textcolor=missedEntryColor,size=size.small)
+                array.push(missedEntryLabels,lb)
+        bearAuditPOIId:=na
+        bearAuditKind:="NONE"
+        bearAuditStateAtArm:=0
+    else if not stillValid or bar_index>bearAuditDeadline
+        bearAuditPOIId:=na
+        bearAuditKind:="NONE"
+        bearAuditStateAtArm:=0
+
+while array.size(missedEntryLabels)>maxMissedEntryMarkers
+    label.delete(array.shift(missedEntryLabels))
+
+//=============================================================================
+// RISK & TARGET ENGINE
+// Created only after a P09 signal emits. Does not alter signal state.
+//=============================================================================
+bool newRiskPlanEvent=false
+
+bool anySignal=bullREVSignal or bearREVSignal or bullCONTSignal or bearCONTSignal
+if anySignal
+    if showOnlyLatestActivePlan and array.size(riskPlans)>0
+        for n=0 to array.size(riskPlans)-1
+            RiskPlan oldVisual=array.get(riskPlans,n)
+            if oldVisual.state<2
+                if not na(oldVisual.entryLine)
+                    line.delete(oldVisual.entryLine)
+                    oldVisual.entryLine:=na
+                if not na(oldVisual.stopLine)
+                    line.delete(oldVisual.stopLine)
+                    oldVisual.stopLine:=na
+                if not na(oldVisual.target1Line)
+                    line.delete(oldVisual.target1Line)
+                    oldVisual.target1Line:=na
+                if not na(oldVisual.target2Line)
+                    line.delete(oldVisual.target2Line)
+                    oldVisual.target2Line:=na
+                if not na(oldVisual.entryTag)
+                    label.delete(oldVisual.entryTag)
+                    oldVisual.entryTag:=na
+                if not na(oldVisual.stopTag)
+                    label.delete(oldVisual.stopTag)
+                    oldVisual.stopTag:=na
+                if not na(oldVisual.target1Tag)
+                    label.delete(oldVisual.target1Tag)
+                    oldVisual.target1Tag:=na
+                if not na(oldVisual.target2Tag)
+                    label.delete(oldVisual.target2Tag)
+                    oldVisual.target2Tag:=na
+                if not na(oldVisual.statusTag)
+                    label.delete(oldVisual.statusTag)
+                    oldVisual.statusTag:=na
+                array.set(riskPlans,n,oldVisual)
+
+    string family=bullREVSignal or bearREVSignal?"REV":"CONT"
+    int dir=bullREVSignal or bullCONTSignal?1:-1
+    int epId=family=="REV"?(dir==1?bullREVEpisodeId:bearREVEpisodeId):(dir==1?bullCONTEpisodeId:bearCONTEpisodeId)
+    string poiEngine=family=="REV"?(dir==1?bullREVPOIEngine:bearREVPOIEngine):(dir==1?bullCONTPOIEngine:bearCONTPOIEngine)
+    int poiId=family=="REV"?(dir==1?bullREVPOIId:bearREVPOIId):(dir==1?bullCONTPOIId:bearCONTPOIId)
+    float sweepPrice=family=="REV"?(dir==1?bullREVSweepPrice:bearREVSweepPrice):na
+
+    int pidx=f_findUnifiedPOIByKey(poiEngine,poiId)
+    float poiTop=pidx>=0?array.get(unifiedPOIs,pidx).top:na
+    float poiBottom=pidx>=0?array.get(unifiedPOIs,pidx).bottom:na
+
+    float entryPrice=close
+    float protectedLevel=dir==1?xProtectedLow:xProtectedHigh
+    float stopPrice=f_planStop(family,dir,entryPrice,poiTop,poiBottom,sweepPrice,protectedLevel)
+    float riskDistance=math.abs(entryPrice-stopPrice)
+
+    [liqT1,liqT2]=f_activeLiquidityTargets(dir,entryPrice)
+    float fallback1=dir==1?entryPrice+riskDistance*fallbackTarget1R:entryPrice-riskDistance*fallbackTarget1R
+    float fallback2=dir==1?entryPrice+riskDistance*fallbackTarget2R:entryPrice-riskDistance*fallbackTarget2R
+
+    float target1=useLiquidityTargets and not na(liqT1)?liqT1:fallback1
+    float target2=useLiquidityTargets and not na(liqT2)?liqT2:fallback2
+    string t1Source=useLiquidityTargets and not na(liqT1)?"LIQ":"R"
+    string t2Source=useLiquidityTargets and not na(liqT2)?"LIQ":"R"
+
+    float rr1=riskDistance>0?math.abs(target1-entryPrice)/riskDistance:na
+    float rr2=riskDistance>0?math.abs(target2-entryPrice)/riskDistance:na
+
+    line eLine=na
+    line sLine=na
+    line t1Line=na
+    line t2Line=na
+    label eTag=na
+    label sTag=na
+    label t1Tag=na
+    label t2Tag=na
+    label stTag=na
+
+    if showRiskPlans
+        int initialRight=na(time_close)?time:time_close
+        eLine:=line.new(time,entryPrice,initialRight,entryPrice,xloc=xloc.bar_time,extend=extend.none,color=entryPlanColor,style=line.style_dotted,width=2)
+        sLine:=line.new(time,stopPrice,initialRight,stopPrice,xloc=xloc.bar_time,extend=extend.none,color=stopPlanColor,width=2)
+        t1Line:=line.new(time,target1,initialRight,target1,xloc=xloc.bar_time,extend=extend.none,color=targetPlanColor,style=line.style_dashed,width=2)
+        t2Line:=line.new(time,target2,initialRight,target2,xloc=xloc.bar_time,extend=extend.none,color=targetPlanColor,width=2)
+        if showRiskLevelTags
+            int setupScore=family=="REV"?(dir==1?bullREVLastScore:bearREVLastScore):(dir==1?bullCONTLastScore:bearCONTLastScore)
+            string setupGrade=family=="REV"?(dir==1?bullREVLastGrade:bearREVLastGrade):(dir==1?bullCONTLastGrade:bearCONTLastGrade)
+            string setupPOIType=family=="REV"?(dir==1?bullREVPOIType:bearREVPOIType):(dir==1?bullCONTPOIType:bearCONTPOIType)
+            string eText=family+" "+(dir==1?"BUY":"SELL")+" · Q"+str.tostring(setupScore)+" "+setupGrade+"\nENTRY  "+str.tostring(entryPrice,format.mintick)+"\n"+setupPOIType+"#"+str.tostring(poiId)+" · EP"+str.tostring(epId)
+            string sText="SL  "+str.tostring(stopPrice,format.mintick)
+            string t1Text="T1  "+str.tostring(target1,format.mintick)+"  ·  "+str.tostring(rr1,"#.00")+"R"
+            string t2Text="T2  "+str.tostring(target2,format.mintick)+"  ·  "+str.tostring(rr2,"#.00")+"R"
+            eTag:=label.new(initialRight,entryPrice,eText,xloc=xloc.bar_time,style=label.style_label_left,color=color.new(dir==1?bullSignalColor:bearSignalColor,10),textcolor=color.white,size=size.normal)
+            sTag:=label.new(initialRight,stopPrice,sText,xloc=xloc.bar_time,style=label.style_label_left,color=color.new(stopPlanColor,10),textcolor=color.white,size=size.normal)
+            t1Tag:=label.new(initialRight,target1,t1Text,xloc=xloc.bar_time,style=label.style_label_left,color=color.new(targetPlanColor,10),textcolor=color.white,size=size.normal)
+            t2Tag:=label.new(initialRight,target2,t2Text,xloc=xloc.bar_time,style=label.style_label_left,color=color.new(targetPlanColor,10),textcolor=color.white,size=size.normal)
+        if showPlanStatusTag
+            float statusY=dir==1?entryPrice+atr*0.30:entryPrice-atr*0.30
+            string statusText=family+" "+(dir==1?"BUY":"SELL")+" · ACTIVE"
+            stTag:=label.new(initialRight,statusY,statusText,xloc=xloc.bar_time,style=label.style_label_left,color=color.new(dir==1?bullSignalColor:bearSignalColor,15),textcolor=color.white,size=size.normal)
+
+    array.push(riskPlans,RiskPlan.new(nextRiskPlanId,family,dir,epId,poiEngine,poiId,bar_index,time,entryPrice,stopPrice,target1,target2,rr1,rr2,t1Source,t2Source,0,na,false,na,"ACTIVE",eLine,sLine,t1Line,t2Line,eTag,sTag,t1Tag,t2Tag,stTag))
+    f_addRecentEntryCard(nextRiskPlanId,family,dir,epId,poiEngine,poiId,time,entryPrice)
+    nextRiskPlanId+=1
+    riskPlanCount+=1
+    newRiskPlanEvent:=true
+
+    lastPlanEntry:=entryPrice
+    lastPlanStop:=stopPrice
+    lastPlanT1:=target1
+    lastPlanT2:=target2
+    lastPlanRR1:=rr1
+    lastPlanRR2:=rr2
+    lastPlanText:=family+" "+(dir==1?"BUY":"SELL")+" · T1 "+t1Source+" · T2 "+t2Source
+
+// Update active risk plans and terminate their drawings cleanly.
+bool tradeOutcomeEvent=false
+if array.size(riskPlans)>0
+    for n=0 to array.size(riskPlans)-1
+        RiskPlan p=array.get(riskPlans,n)
+        bool terminal=p.state>=2
+        bool bull=p.direction==1
+
+        if not terminal and bar_index>p.signalBar
+            bool stopHit=bull?low<=p.stop:high>=p.stop
+            bool t2Hit=bull?high>=p.target2:low<=p.target2
+            bool t1Hit=bull?high>=p.target1:low<=p.target1
+            bool expired=bar_index-p.signalBar>riskPlanMaxAgeBars
+            bool hadT1=p.state==1
+
+            // Conservative precedence when multiple levels trade within one bar.
+            if stopHit
+                p.state:=3
+                p.terminalTime:=time
+                p.outcome:="STOPPED"
+                p.realizedR:=outcomeModel=="50% T1 + BE remainder" and hadT1?p.rr1*0.50:-1.0
+            else if t2Hit
+                p.state:=2
+                p.terminalTime:=time
+                p.outcome:="T2_HIT"
+                p.realizedR:=outcomeModel=="50% T1 + BE remainder"?p.rr1*0.50+p.rr2*0.50:p.rr2
+            else if expired
+                p.state:=4
+                p.terminalTime:=time
+                p.outcome:="EXPIRED"
+                p.realizedR:=na
+            else if t1Hit and p.state==0
+                p.state:=1
+                p.outcome:="T1_HIT"
+                t1ReachedCount+=1
+                f_updateRecentEntryCard(p.id,p.family,p.direction,p.episodeId,p.poiEngine,p.poiId,p.entry,"T1 HIT",na)
+
+        terminal:=p.state>=2
+
+        if terminal and not p.outcomeRecorded
+            p.outcomeRecorded:=true
+            tradeOutcomeEvent:=true
+            if p.state==2
+                completedTradeCount+=1
+                t2ReachedCount+=1
+            else if p.state==3
+                stoppedTradeCount+=1
+            else if p.state==4
+                expiredTradeCount+=1
+
+            if not na(p.realizedR)
+                totalRealizedR+=p.realizedR
+                bool win=p.realizedR>0
+                if p.family=="REV"
+                    revClosedCount+=1
+                    revRealizedR+=p.realizedR
+                    if win
+                        revWinCount+=1
+                    else
+                        revLossCount+=1
+                else
+                    contClosedCount+=1
+                    contRealizedR+=p.realizedR
+                    if win
+                        contWinCount+=1
+                    else
+                        contLossCount+=1
+
+            lastOutcomeText:=p.family+" "+(bull?"BUY":"SELL")+" · "+p.outcome+(na(p.realizedR)?"":" · "+str.tostring(p.realizedR,"#.00")+"R")
+
+            string terminalStatus=p.outcome=="T2_HIT"?"T2 HIT":p.outcome=="STOPPED"?"STOPPED":p.outcome=="EXPIRED"?"EXPIRED":p.outcome
+            f_updateRecentEntryCard(p.id,p.family,p.direction,p.episodeId,p.poiEngine,p.poiId,p.entry,terminalStatus,p.realizedR)
+
+            if showOutcomeLabels
+                float y=bull?low:high
+                label lb=label.new(time,y,lastOutcomeText,xloc=xloc.bar_time,style=label.style_none,textcolor=na(p.realizedR)?color.gray:p.realizedR>=0?bullSignalColor:bearSignalColor,size=f_textSize())
+                array.push(outcomeLabels,lb)
+                while array.size(outcomeLabels)>maxOutcomeLabels
+                    label.delete(array.shift(outcomeLabels))
+
+        int rightTime=terminal and not na(p.terminalTime)?p.terminalTime:time
+
+        if not na(p.entryLine)
+            line.set_xy2(p.entryLine,rightTime,p.entry)
+        if not na(p.stopLine)
+            line.set_xy2(p.stopLine,rightTime,p.stop)
+        if not na(p.target1Line)
+            line.set_xy2(p.target1Line,rightTime,p.target1)
+        if not na(p.target2Line)
+            line.set_xy2(p.target2Line,rightTime,p.target2)
+        if not na(p.entryTag)
+            label.set_xy(p.entryTag,rightTime,p.entry)
+        if not na(p.stopTag)
+            label.set_xy(p.stopTag,rightTime,p.stop)
+        if not na(p.target1Tag)
+            label.set_xy(p.target1Tag,rightTime,p.target1)
+        if not na(p.target2Tag)
+            label.set_xy(p.target2Tag,rightTime,p.target2)
+        if not na(p.statusTag)
+            float statusY=p.direction==1?p.entry+atr*0.30:p.entry-atr*0.30
+            label.set_xy(p.statusTag,rightTime,statusY)
+            string stateText=p.state==1?"T1 HIT":"ACTIVE"
+            label.set_text(p.statusTag,p.family+" "+(p.direction==1?"BUY":"SELL")+" · "+stateText)
+
+        if terminal and not showTerminalRiskPlans
+            if not na(p.entryLine)
+                line.delete(p.entryLine)
+                p.entryLine:=na
+            if not na(p.stopLine)
+                line.delete(p.stopLine)
+                p.stopLine:=na
+            if not na(p.target1Line)
+                line.delete(p.target1Line)
+                p.target1Line:=na
+            if not na(p.target2Line)
+                line.delete(p.target2Line)
+                p.target2Line:=na
+            if not na(p.entryTag)
+                label.delete(p.entryTag)
+                p.entryTag:=na
+            if not na(p.stopTag)
+                label.delete(p.stopTag)
+                p.stopTag:=na
+            if not na(p.target1Tag)
+                label.delete(p.target1Tag)
+                p.target1Tag:=na
+            if not na(p.target2Tag)
+                label.delete(p.target2Tag)
+                p.target2Tag:=na
+            if not na(p.statusTag)
+                label.delete(p.statusTag)
+                p.statusTag:=na
+
+        array.set(riskPlans,n,p)
+
+while array.size(riskPlans)>maxRiskPlans
+    RiskPlan old=array.shift(riskPlans)
+    if not na(old.entryLine)
+        line.delete(old.entryLine)
+    if not na(old.stopLine)
+        line.delete(old.stopLine)
+    if not na(old.target1Line)
+        line.delete(old.target1Line)
+    if not na(old.target2Line)
+        line.delete(old.target2Line)
+    if not na(old.entryTag)
+        label.delete(old.entryTag)
+    if not na(old.stopTag)
+        label.delete(old.stopTag)
+    if not na(old.target1Tag)
+        label.delete(old.target1Tag)
+    if not na(old.target2Tag)
+        label.delete(old.target2Tag)
+    if not na(old.statusTag)
+        label.delete(old.statusTag)
+
+//=============================================================================
+// DIAGNOSTIC COUNTS
+//=============================================================================
+
+int activeTier1=0
+int activeTier2=0
+int activeTier3=0
+int activeTier4=0
+int eqhCount=0
+int eqlCount=0
+
+if array.size(liquidity)>0
+    for n=0 to array.size(liquidity)-1
+        LiquidityLevel q=array.get(liquidity,n)
+        if q.state==0
+            if q.tier==1
+                activeTier1+=1
+            else if q.tier==2
+                activeTier2+=1
+            else if q.tier==3
+                activeTier3+=1
+            else
+                activeTier4+=1
+            if q.buySide and q.clusterCount>=2
+                eqhCount+=1
+            if not q.buySide and q.clusterCount>=2
+                eqlCount+=1
+
+int activePrimaryFVG=0
+int activeSecondaryFVG=0
+if array.size(imbalanceZones)>0
+    for n=0 to array.size(imbalanceZones)-1
+        ImbalanceZone z=array.get(imbalanceZones,n)
+        if z.state<2
+            if z.primary or na(z.episodeId)
+                activePrimaryFVG+=1
+            else
+                activeSecondaryFVG+=1
+
+int activeBullOB=0
+int activeBearOB=0
+int activeBullBB=0
+int activeBearBB=0
+if array.size(orderBlocks)>0
+    for n=0 to array.size(orderBlocks)-1
+        OrderBlockZone z=array.get(orderBlocks,n)
+        if z.state==0
+            if z.direction==1
+                activeBullOB+=1
+            else
+                activeBearOB+=1
+        else if z.state==1
+            if z.direction==-1
+                activeBullBB+=1
+            else
+                activeBearBB+=1
+
+int unifiedBullPOI=0
+int unifiedBearPOI=0
+int unifiedFVG=0
+int unifiedIFVG=0
+int unifiedOB=0
+int unifiedBB=0
+if array.size(unifiedPOIs)>0
+    for n=0 to array.size(unifiedPOIs)-1
+        UnifiedPOI p=array.get(unifiedPOIs,n)
+        if p.direction==1
+            unifiedBullPOI+=1
+        else
+            unifiedBearPOI+=1
+        if p.poiType=="FVG"
+            unifiedFVG+=1
+        else if p.poiType=="IFVG"
+            unifiedIFVG+=1
+        else if p.poiType=="OB"
+            unifiedOB+=1
+        else if p.poiType=="BB"
+            unifiedBB+=1
+
+int nearestBullPOI=f_nearestPOIIndex(1)
+int nearestBearPOI=f_nearestPOIIndex(-1)
+string nearestBullPOIText=nearestBullPOI>=0?array.get(unifiedPOIs,nearestBullPOI).poiType+"#"+str.tostring(array.get(unifiedPOIs,nearestBullPOI).sourceId):"NONE"
+string nearestBearPOIText=nearestBearPOI>=0?array.get(unifiedPOIs,nearestBearPOI).poiType+"#"+str.tostring(array.get(unifiedPOIs,nearestBearPOI).sourceId):"NONE"
+
+f_trendText(int t) =>
+    t==1?"BULL":t==-1?"BEAR":"NEUTRAL"
+
+f_priceText(float v) =>
+    na(v)?"—":str.tostring(v,format.mintick)
+
+float avgRealizedR=(revClosedCount+contClosedCount)>0?totalRealizedR/(revClosedCount+contClosedCount):na
+float revAvgR=revClosedCount>0?revRealizedR/revClosedCount:na
+float contAvgR=contClosedCount>0?contRealizedR/contClosedCount:na
+float revWinRate=revClosedCount>0?100.0*revWinCount/revClosedCount:na
+float contWinRate=contClosedCount>0?100.0*contWinCount/contClosedCount:na
+
+var table diag=table.new(position.top_right,2,107,border_width=1)
+
+if barstate.islast
+    table.clear(diag,0,0,1,106)
+    if showDiagnostics
+        int r=0
+        table.cell(diag,0,r,"ARTHA v2 P12.4")
+        table.cell(diag,1,r,runtimeProfile=="Production"?"PRODUCTION CANDIDATE":"RESEARCH MODE")
+        r+=1
+        table.cell(diag,0,r,"Runtime / Display")
+        table.cell(diag,1,r,runtimeProfile+" / "+displayMode)
+        r+=1
+        table.cell(diag,0,r,"Internal trend")
+        table.cell(diag,1,r,f_trendText(iTrend))
+        r+=1
+        table.cell(diag,0,r,"External trend")
+        table.cell(diag,1,r,f_trendText(xTrend))
+        r+=1
+        table.cell(diag,0,r,"Internal event")
+        table.cell(diag,1,r,lastInternalEvent)
+        r+=1
+        table.cell(diag,0,r,"External event")
+        table.cell(diag,1,r,lastExternalEvent)
+        r+=1
+        table.cell(diag,0,r,"i Protected H/L")
+        table.cell(diag,1,r,f_priceText(iProtectedHigh)+" / "+f_priceText(iProtectedLow))
+        r+=1
+        table.cell(diag,0,r,"x Protected H/L")
+        table.cell(diag,1,r,f_priceText(xProtectedHigh)+" / "+f_priceText(xProtectedLow))
+        r+=1
+        table.cell(diag,0,r,"Active T1/T2")
+        table.cell(diag,1,r,str.tostring(activeTier1)+" / "+str.tostring(activeTier2))
+        r+=1
+        table.cell(diag,0,r,"Active T3/T4")
+        table.cell(diag,1,r,str.tostring(activeTier3)+" / "+str.tostring(activeTier4))
+        r+=1
+        table.cell(diag,0,r,"EQH / EQL")
+        table.cell(diag,1,r,str.tostring(eqhCount)+" / "+str.tostring(eqlCount))
+        r+=1
+        table.cell(diag,0,r,"Last sweep")
+        table.cell(diag,1,r,latestSweepSource+(na(latestSweepTier)?"":" · T"+str.tostring(latestSweepTier)))
+        r+=1
+        table.cell(diag,0,r,"Last resolution")
+        table.cell(diag,1,r,latestResolutionSource+(na(latestResolutionTier)?"":" · T"+str.tostring(latestResolutionTier)))
+        r+=1
+        table.cell(diag,0,r,"Sweeps / Resolves")
+        table.cell(diag,1,r,str.tostring(liquiditySweepCount)+" / "+str.tostring(liquidityResolutionCount))
+        r+=1
+        table.cell(diag,0,r,"Expired")
+        table.cell(diag,1,r,str.tostring(liquidityExpiryCount))
+        r+=1
+        table.cell(diag,0,r,"Superseded")
+        table.cell(diag,1,r,str.tostring(liquiditySupersedeCount))
+        r+=1
+        table.cell(diag,0,r,"Dup suppressions")
+        table.cell(diag,1,r,str.tostring(duplicateSuppressions))
+        r+=1
+        table.cell(diag,0,r,"Body / ATR")
+        table.cell(diag,1,r,str.tostring(displacementBodyATR,"#.00"))
+        r+=1
+        table.cell(diag,0,r,"Range / ATR")
+        table.cell(diag,1,r,str.tostring(displacementRangeATR,"#.00"))
+        r+=1
+        table.cell(diag,0,r,"Body efficiency")
+        table.cell(diag,1,r,str.tostring(displacementBodyPct*100,"#.0")+"%")
+        r+=1
+        table.cell(diag,0,r,"Body vs avg")
+        table.cell(diag,1,r,na(bodyVsAvg)?"—":str.tostring(bodyVsAvg,"#.00")+"x")
+        r+=1
+        table.cell(diag,0,r,"Range vs avg")
+        table.cell(diag,1,r,na(rangeVsAvg)?"—":str.tostring(rangeVsAvg,"#.00")+"x")
+        r+=1
+        table.cell(diag,0,r,"Bull/Bear DSP score")
+        table.cell(diag,1,r,str.tostring(bullDisplacementScore)+" / "+str.tostring(bearDisplacementScore))
+        r+=1
+        table.cell(diag,0,r,"DSP events B/S")
+        table.cell(diag,1,r,str.tostring(bullDisplacementCount)+" / "+str.tostring(bearDisplacementCount))
+        r+=1
+        table.cell(diag,0,r,"Last DSP score B/S")
+        table.cell(diag,1,r,(na(lastBullDisplacementScore)?"—":str.tostring(lastBullDisplacementScore))+" / "+(na(lastBearDisplacementScore)?"—":str.tostring(lastBearDisplacementScore)))
+        r+=1
+        table.cell(diag,0,r,"Episode state")
+        table.cell(diag,1,r,episodeActive?(episodeDirection==1?"BULL ACTIVE":"BEAR ACTIVE"):"IDLE")
+        r+=1
+        table.cell(diag,0,r,"Episode DSP count")
+        table.cell(diag,1,r,episodeActive?str.tostring(episodeEventCount):"—")
+        r+=1
+        table.cell(diag,0,r,"Episode peak score")
+        table.cell(diag,1,r,episodeActive and not na(episodePeakScore)?str.tostring(episodePeakScore):"—")
+        r+=1
+        table.cell(diag,0,r,"Completed episodes")
+        table.cell(diag,1,r,str.tostring(completedEpisodeCount)+" · B "+str.tostring(bullEpisodeCount)+" / S "+str.tostring(bearEpisodeCount))
+        r+=1
+        table.cell(diag,0,r,"Last episode")
+        table.cell(diag,1,r,lastCompletedEpisodeDirection==0?"—":(lastCompletedEpisodeDirection==1?"BULL ":"BEAR ")+str.tostring(lastCompletedEpisodePeakScore)+" · "+str.tostring(lastCompletedEpisodeBars)+" bars")
+        r+=1
+        table.cell(diag,0,r,"FVG B/S")
+        table.cell(diag,1,r,str.tostring(bullFVGCount)+" / "+str.tostring(bearFVGCount))
+        r+=1
+        table.cell(diag,0,r,"IFVG B/S")
+        table.cell(diag,1,r,str.tostring(bullIFVGCount)+" / "+str.tostring(bearIFVGCount))
+        r+=1
+        table.cell(diag,0,r,"FVG quality")
+        table.cell(diag,1,r,"S "+str.tostring(structuralFVGCount)+" · D "+str.tostring(displacementFVGCount)+" · O "+str.tostring(ordinaryFVGCount))
+        r+=1
+        table.cell(diag,0,r,"Tracked imbalances")
+        table.cell(diag,1,r,str.tostring(array.size(imbalanceZones)))
+        r+=1
+        table.cell(diag,0,r,"Active primary FVG")
+        table.cell(diag,1,r,str.tostring(activePrimaryFVG))
+        r+=1
+        table.cell(diag,0,r,"Active secondary FVG")
+        table.cell(diag,1,r,str.tostring(activeSecondaryFVG))
+        r+=1
+        table.cell(diag,0,r,"Retired imbalances")
+        table.cell(diag,1,r,str.tostring(retiredImbalanceCount))
+        r+=1
+        table.cell(diag,0,r,"OB created B/S")
+        table.cell(diag,1,r,str.tostring(bullOBCount)+" / "+str.tostring(bearOBCount))
+        r+=1
+        table.cell(diag,0,r,"Active OB B/S")
+        table.cell(diag,1,r,str.tostring(activeBullOB)+" / "+str.tostring(activeBearOB))
+        r+=1
+        table.cell(diag,0,r,"Active BB B/S")
+        table.cell(diag,1,r,str.tostring(activeBullBB)+" / "+str.tostring(activeBearBB))
+        r+=1
+        table.cell(diag,0,r,"BB transitions B/S")
+        table.cell(diag,1,r,str.tostring(bullBBCount)+" / "+str.tostring(bearBBCount))
+        r+=1
+        table.cell(diag,0,r,"Retired OB/BB")
+        table.cell(diag,1,r,str.tostring(retiredOBBBCount))
+        if showPOIDiagnostics
+            r+=1
+            table.cell(diag,0,r,"Unified POI B/S")
+            table.cell(diag,1,r,str.tostring(unifiedBullPOI)+" / "+str.tostring(unifiedBearPOI))
+            r+=1
+            table.cell(diag,0,r,"POI FVG / IFVG")
+            table.cell(diag,1,r,str.tostring(unifiedFVG)+" / "+str.tostring(unifiedIFVG))
+            r+=1
+            table.cell(diag,0,r,"POI OB / BB")
+            table.cell(diag,1,r,str.tostring(unifiedOB)+" / "+str.tostring(unifiedBB))
+            r+=1
+            table.cell(diag,0,r,"Nearest bull POI")
+            table.cell(diag,1,r,nearestBullPOIText)
+            r+=1
+            table.cell(diag,0,r,"Nearest bear POI")
+            table.cell(diag,1,r,nearestBearPOIText)
+        r+=1
+        table.cell(diag,0,r,"REV state B/S")
+        table.cell(diag,1,r,f_revStateText(bullREVState)+" / "+f_revStateText(bearREVState))
+        r+=1
+        table.cell(diag,0,r,"REV sweep B/S")
+        table.cell(diag,1,r,bullREVSweepSource+" / "+bearREVSweepSource)
+        r+=1
+        table.cell(diag,0,r,"REV episode B/S")
+        table.cell(diag,1,r,(na(bullREVEpisodeId)?"—":str.tostring(bullREVEpisodeId))+" / "+(na(bearREVEpisodeId)?"—":str.tostring(bearREVEpisodeId)))
+        r+=1
+        table.cell(diag,0,r,"REV POI B/S")
+        table.cell(diag,1,r,bullREVPOIType+"#"+(na(bullREVPOIId)?"—":str.tostring(bullREVPOIId))+" / "+bearREVPOIType+"#"+(na(bearREVPOIId)?"—":str.tostring(bearREVPOIId)))
+        r+=1
+        table.cell(diag,0,r,"REV eligible B/S")
+        table.cell(diag,1,r,str.tostring(bullREVEligibleCount)+" / "+str.tostring(bearREVEligibleCount))
+        r+=1
+        table.cell(diag,0,r,"REV invalid B/S")
+        table.cell(diag,1,r,str.tostring(bullREVInvalidationCount)+" / "+str.tostring(bearREVInvalidationCount))
+        r+=1
+        table.cell(diag,0,r,"CONT state B/S")
+        table.cell(diag,1,r,f_contStateText(bullCONTState)+" / "+f_contStateText(bearCONTState))
+        r+=1
+        table.cell(diag,0,r,"CONT episode B/S")
+        table.cell(diag,1,r,(na(bullCONTEpisodeId)?"—":str.tostring(bullCONTEpisodeId))+" / "+(na(bearCONTEpisodeId)?"—":str.tostring(bearCONTEpisodeId)))
+        r+=1
+        table.cell(diag,0,r,"CONT POI B/S")
+        table.cell(diag,1,r,bullCONTPOIType+"#"+(na(bullCONTPOIId)?"—":str.tostring(bullCONTPOIId))+" / "+bearCONTPOIType+"#"+(na(bearCONTPOIId)?"—":str.tostring(bearCONTPOIId)))
+        r+=1
+        table.cell(diag,0,r,"CONT eligible B/S")
+        table.cell(diag,1,r,str.tostring(bullCONTEligibleCount)+" / "+str.tostring(bearCONTEligibleCount))
+        r+=1
+        table.cell(diag,0,r,"CONT invalid B/S")
+        table.cell(diag,1,r,str.tostring(bullCONTInvalidationCount)+" / "+str.tostring(bearCONTInvalidationCount))
+        if showQualityDiagnostics
+            r+=1
+            table.cell(diag,0,r,"REV quality B/S")
+            table.cell(diag,1,r,(na(bullREVLastScore)?"—":str.tostring(bullREVLastScore)+" "+bullREVLastGrade)+" / "+(na(bearREVLastScore)?"—":str.tostring(bearREVLastScore)+" "+bearREVLastGrade))
+            r+=1
+            table.cell(diag,0,r,"REV breakdown B")
+            table.cell(diag,1,r,bullREVLastBreakdown)
+            r+=1
+            table.cell(diag,0,r,"REV breakdown S")
+            table.cell(diag,1,r,bearREVLastBreakdown)
+            r+=1
+            table.cell(diag,0,r,"CONT quality B/S")
+            table.cell(diag,1,r,(na(bullCONTLastScore)?"—":str.tostring(bullCONTLastScore)+" "+bullCONTLastGrade)+" / "+(na(bearCONTLastScore)?"—":str.tostring(bearCONTLastScore)+" "+bearCONTLastGrade))
+            r+=1
+            table.cell(diag,0,r,"CONT breakdown B")
+            table.cell(diag,1,r,bullCONTLastBreakdown)
+            r+=1
+            table.cell(diag,0,r,"CONT breakdown S")
+            table.cell(diag,1,r,bearCONTLastBreakdown)
+        r+=1
+        table.cell(diag,0,r,"Signals B/S")
+        table.cell(diag,1,r,str.tostring(bullSignalCount)+" / "+str.tostring(bearSignalCount))
+        r+=1
+        table.cell(diag,0,r,"Signals REV/CONT")
+        table.cell(diag,1,r,str.tostring(revSignalCount)+" / "+str.tostring(contSignalCount))
+        r+=1
+        table.cell(diag,0,r,"Rejected quality")
+        table.cell(diag,1,r,str.tostring(signalRejectedQuality))
+        r+=1
+        table.cell(diag,0,r,"Rejected duplicate")
+        table.cell(diag,1,r,str.tostring(signalRejectedDuplicate))
+        r+=1
+        table.cell(diag,0,r,"Rejected cooldown")
+        table.cell(diag,1,r,str.tostring(signalRejectedCooldown))
+        r+=1
+        table.cell(diag,0,r,"Last signal")
+        table.cell(diag,1,r,lastSignalText)
+        if auditEnabled
+            r+=1
+            table.cell(diag,0,r,"Audit confirm B/S")
+            table.cell(diag,1,r,str.tostring(bullAuditConfirmCount)+" / "+str.tostring(bearAuditConfirmCount))
+            r+=1
+            table.cell(diag,0,r,"Missed audit B/S")
+            table.cell(diag,1,r,str.tostring(bullMissedEntryCount)+" / "+str.tostring(bearMissedEntryCount))
+            r+=1
+            table.cell(diag,0,r,"Audit captured")
+            table.cell(diag,1,r,str.tostring(arthaCapturedAuditCount))
+            r+=1
+            table.cell(diag,0,r,"Early opp B/S")
+            table.cell(diag,1,r,str.tostring(bullEarlyOpportunityCount)+" / "+str.tostring(bearEarlyOpportunityCount))
+            r+=1
+            table.cell(diag,0,r,"Raw reactions")
+            table.cell(diag,1,r,str.tostring(rawReactionCount))
+            r+=1
+            table.cell(diag,0,r,"Last audit kind")
+            table.cell(diag,1,r,lastAuditKind)
+            r+=1
+            table.cell(diag,0,r,"Last audit family")
+            table.cell(diag,1,r,lastAuditFamily)
+            r+=1
+            table.cell(diag,0,r,"Last reaction")
+            table.cell(diag,1,r,lastAuditClass)
+            r+=1
+            table.cell(diag,0,r,"Last miss reason")
+            table.cell(diag,1,r,lastAuditReason)
+        r+=1
+        table.cell(diag,0,r,"Risk plans")
+        table.cell(diag,1,r,str.tostring(riskPlanCount))
+        r+=1
+        table.cell(diag,0,r,"Last plan")
+        table.cell(diag,1,r,lastPlanText)
+        r+=1
+        table.cell(diag,0,r,"Entry / Stop")
+        table.cell(diag,1,r,f_priceText(lastPlanEntry)+" / "+f_priceText(lastPlanStop))
+        r+=1
+        table.cell(diag,0,r,"Target 1 / RR")
+        table.cell(diag,1,r,f_priceText(lastPlanT1)+" / "+(na(lastPlanRR1)?"—":str.tostring(lastPlanRR1,"#.00")+"R"))
+        r+=1
+        table.cell(diag,0,r,"Target 2 / RR")
+        table.cell(diag,1,r,f_priceText(lastPlanT2)+" / "+(na(lastPlanRR2)?"—":str.tostring(lastPlanRR2,"#.00")+"R"))
+        if showOutcomeDiagnostics
+            r+=1
+            table.cell(diag,0,r,"T1 / T2 reached")
+            table.cell(diag,1,r,str.tostring(t1ReachedCount)+" / "+str.tostring(t2ReachedCount))
+            r+=1
+            table.cell(diag,0,r,"Stopped / Expired")
+            table.cell(diag,1,r,str.tostring(stoppedTradeCount)+" / "+str.tostring(expiredTradeCount))
+            r+=1
+            table.cell(diag,0,r,"Realized R")
+            table.cell(diag,1,r,str.tostring(totalRealizedR,"#.00"))
+            r+=1
+            table.cell(diag,0,r,"Average R")
+            table.cell(diag,1,r,na(avgRealizedR)?"—":str.tostring(avgRealizedR,"#.00"))
+            r+=1
+            table.cell(diag,0,r,"REV avgR / win%")
+            table.cell(diag,1,r,(na(revAvgR)?"—":str.tostring(revAvgR,"#.00"))+" / "+(na(revWinRate)?"—":str.tostring(revWinRate,"#.0")+"%"))
+            r+=1
+            table.cell(diag,0,r,"CONT avgR / win%")
+            table.cell(diag,1,r,(na(contAvgR)?"—":str.tostring(contAvgR,"#.00"))+" / "+(na(contWinRate)?"—":str.tostring(contWinRate,"#.0")+"%"))
+            r+=1
+            table.cell(diag,0,r,"Last outcome")
+            table.cell(diag,1,r,lastOutcomeText)
+
+//=============================================================================
+// ALERTS — ENGINE EVENTS ONLY, NOT TRADE SIGNALS
+//=============================================================================
+alertcondition(bullMissedEntryEvent,"ARTHA v2 Bullish Missed Entry Audit","PLUTUS-style bullish POI reaction confirmed without an ARTHA capture")
+alertcondition(bearMissedEntryEvent,"ARTHA v2 Bearish Missed Entry Audit","PLUTUS-style bearish POI reaction confirmed without an ARTHA capture")
+alertcondition(newRiskPlanEvent,"ARTHA v2 Risk Plan Created","Risk and target plan created for execution signal")
+alertcondition(tradeOutcomeEvent,"ARTHA v2 Trade Outcome Update","A tracked ARTHA trade plan reached a terminal outcome")
+alertcondition(bullREVSignal,"ARTHA v2 BUY REV","Bullish REV execution signal")
+alertcondition(bearREVSignal,"ARTHA v2 SELL REV","Bearish REV execution signal")
+alertcondition(bullCONTSignal,"ARTHA v2 BUY CONT","Bullish CONT execution signal")
+alertcondition(bearCONTSignal,"ARTHA v2 SELL CONT","Bearish CONT execution signal")
+alertcondition(bullCONTEligibleEvent,"ARTHA v2 Bullish CONT Eligible","Bullish continuation setup became eligible")
+alertcondition(bearCONTEligibleEvent,"ARTHA v2 Bearish CONT Eligible","Bearish continuation setup became eligible")
+alertcondition(bullREVEligibleEvent,"ARTHA v2 Bullish REV Eligible","Bullish reversal setup became eligible")
+alertcondition(bearREVEligibleEvent,"ARTHA v2 Bearish REV Eligible","Bearish reversal setup became eligible")
+alertcondition(bullOBEvent,"ARTHA v2 Bullish OB","Qualified bullish causal Order Block created")
+alertcondition(bearOBEvent,"ARTHA v2 Bearish OB","Qualified bearish causal Order Block created")
+alertcondition(bullBBEvent,"ARTHA v2 Bullish Breaker","Qualified bullish Breaker Block transition")
+alertcondition(bearBBEvent,"ARTHA v2 Bearish Breaker","Qualified bearish Breaker Block transition")
+alertcondition(bullFVGEvent,"ARTHA v2 Bullish FVG","Confirmed bullish FVG created")
+alertcondition(bearFVGEvent,"ARTHA v2 Bearish FVG","Confirmed bearish FVG created")
+alertcondition(bullIFVGEvent,"ARTHA v2 Bullish IFVG","Confirmed bullish IFVG transition")
+alertcondition(bearIFVGEvent,"ARTHA v2 Bearish IFVG","Confirmed bearish IFVG transition")
+alertcondition(bullDisplacementEvent,"ARTHA v2 Bullish Displacement","Confirmed bullish displacement event")
+alertcondition(bearDisplacementEvent,"ARTHA v2 Bearish Displacement","Confirmed bearish displacement event")
+alertcondition(bullEpisodeCompleted,"ARTHA v2 Bullish Displacement Episode Complete","Confirmed bullish displacement episode completed")
+alertcondition(bearEpisodeCompleted,"ARTHA v2 Bearish Displacement Episode Complete","Confirmed bearish displacement episode completed")
+alertcondition(iBullBOS or xBullBOS,"ARTHA v2 Bullish BOS","Confirmed bullish BOS")
+alertcondition(iBearBOS or xBearBOS,"ARTHA v2 Bearish BOS","Confirmed bearish BOS")
+alertcondition(iBullCH or xBullCH,"ARTHA v2 Bullish CHoCH","Confirmed bullish CHoCH")
+alertcondition(iBearCH or xBearCH,"ARTHA v2 Bearish CHoCH","Confirmed bearish CHoCH")
+alertcondition(iBullMSS or xBullMSS,"ARTHA v2 Bullish MSS","Confirmed bullish MSS")
+alertcondition(iBearMSS or xBearMSS,"ARTHA v2 Bearish MSS","Confirmed bearish MSS")
+alertcondition(bullLiquiditySweep,"ARTHA v2 Bullish Liquidity Sweep","Confirmed sell-side liquidity sweep")
+alertcondition(bearLiquiditySweep,"ARTHA v2 Bearish Liquidity Sweep","Confirmed buy-side liquidity sweep")
+alertcondition(bullLiquidityResolution,"ARTHA v2 Bullish Liquidity Resolution","Confirmed bullish liquidity resolution")
+alertcondition(bearLiquidityResolution,"ARTHA v2 Bearish Liquidity Resolution","Confirmed bearish liquidity resolution")
