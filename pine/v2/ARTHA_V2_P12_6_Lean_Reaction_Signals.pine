@@ -3,10 +3,10 @@ indicator("ARTHA v2 P12.6 — Lean Reaction Signals", shorttitle="ARTHA v2 P12.6
 
 //=============================================================================
 // ARTHA v2 — PHASE 12.6
-// Lean production build.
-// TRUE_MISS and EARLY reaction opportunities are promoted into execution signals.
-// RAW POI reactions are ignored.
-// Large audit/diagnostic display layer removed to reduce Pine main-body size.
+// Lean production build reset from P11.6 + P12.
+// TRUE_MISS and EARLY reactions are promoted into execution signals.
+// RAW reactions are ignored.
+// Only the latest active plan + last four recent entry/result cards are retained.
 //=============================================================================
 
 //=============================================================================
@@ -226,10 +226,8 @@ string outcomeModel=input.string("50% T1 + BE remainder","Outcome model",options
 bool showRiskLevelTags=input.bool(true,"Show ENTRY / SL / T1 / T2 labels",group=G13)
 bool showOnlyLatestActivePlan=input.bool(true,"Draw only newest active plan",group=G13)
 bool showPlanStatusTag=input.bool(false,"Show active plan status tag",group=G13)
-bool showOutcomeLabels=input.bool(false,"Show terminal outcome labels",group=G13)
 bool showRecentEntryResults=input.bool(true,"Show recent completed entries",group=G13)
 int recentEntryResultCount=input.int(4,"Recent completed entries to keep",minval=1,maxval=10,group=G13)
-int maxOutcomeLabels=input.int(30,"Maximum outcome labels",minval=5,maxval=100,group=G13)
 
 //=============================================================================
 // 14 ADAPTIVE REACTION SIGNALS
@@ -862,6 +860,7 @@ f_signalScoreForPlan(string family,int epId,string poiEngine,int poiId) =>
 type RiskPlan
     int id
     string family
+    string source
     int direction
     int episodeId
     string poiEngine
@@ -917,20 +916,20 @@ var int contWinCount=0
 var int revLossCount=0
 var int contLossCount=0
 var string lastOutcomeText="NONE"
-var label[] outcomeLabels=array.new_label()
 var label[] recentEntryResultLabels=array.new_label()
 var int[] recentEntryResultIds=array.new_int()
 
-f_recentEntryText(string family,int dir,int score,float entry,string status,float realizedR) =>
+f_recentEntryText(string family,string source,int dir,int score,float entry,string status,float realizedR) =>
     string grade=na(score)?"":f_qualityGrade(score)
     string scoreText=na(score)?"":" · Q"+str.tostring(score)+" "+grade
+    string sourceText=source=="NORMAL"?"":" · "+source
     string rText=na(realizedR)?"":" · "+(realizedR>0?"+":"")+str.tostring(realizedR,"#.00")+"R"
-    family+" "+(dir==1?"BUY":"SELL")+scoreText+"\nENTRY "+str.tostring(entry,format.mintick)+"\n"+status+rText
+    family+" "+(dir==1?"BUY":"SELL")+sourceText+scoreText+"\nENTRY "+str.tostring(entry,format.mintick)+"\n"+status+rText
 
-f_addRecentEntryCard(int planId,string family,int dir,int epId,string poiEngine,int poiId,int signalTime,float entry) =>
+f_addRecentEntryCard(int planId,string family,string source,int dir,int epId,string poiEngine,int poiId,int signalTime,float entry) =>
     if showRecentEntryResults
         int score=f_signalScoreForPlan(family,epId,poiEngine,poiId)
-        string txt=f_recentEntryText(family,dir,score,entry,"ACTIVE",na)
+        string txt=f_recentEntryText(family,source,dir,score,entry,"ACTIVE",na)
         color bg=dir==1?bullSignalColor:bearSignalColor
         label lb=label.new(signalTime,entry,txt,xloc=xloc.bar_time,style=dir==1?label.style_label_up:label.style_label_down,color=color.new(bg,15),textcolor=color.white,size=size.small)
         array.push(recentEntryResultIds,planId)
@@ -939,7 +938,7 @@ f_addRecentEntryCard(int planId,string family,int dir,int epId,string poiEngine,
             array.shift(recentEntryResultIds)
             label.delete(array.shift(recentEntryResultLabels))
 
-f_updateRecentEntryCard(int planId,string family,int dir,int epId,string poiEngine,int poiId,float entry,string status,float realizedR) =>
+f_updateRecentEntryCard(int planId,string family,string source,int dir,int epId,string poiEngine,int poiId,float entry,string status,float realizedR) =>
     if showRecentEntryResults and array.size(recentEntryResultIds)>0
         int found=-1
         for n=0 to array.size(recentEntryResultIds)-1
@@ -949,7 +948,7 @@ f_updateRecentEntryCard(int planId,string family,int dir,int epId,string poiEngi
         if found>=0
             label lb=array.get(recentEntryResultLabels,found)
             int score=f_signalScoreForPlan(family,epId,poiEngine,poiId)
-            label.set_text(lb,f_recentEntryText(family,dir,score,entry,status,realizedR))
+            label.set_text(lb,f_recentEntryText(family,source,dir,score,entry,status,realizedR))
             color bg=na(realizedR)?(dir==1?bullSignalColor:bearSignalColor):realizedR>=0?bullSignalColor:bearSignalColor
             label.set_color(lb,color.new(bg,15))
             label.set_textcolor(lb,color.white)
@@ -2481,6 +2480,7 @@ var string lastBearCONTScope="INTERNAL"
 
 bool reactionSignalEvent=false
 string reactionFamily="NONE"
+string reactionKind="NONE"
 int reactionDir=0
 int reactionEpisodeId=na
 string reactionPOIEngine="NONE"
@@ -2573,6 +2573,7 @@ if not na(bullRxPOIId)
         if allowed and not na(epId) and score>=minScore and f_signalCooldownOK(1) and not duplicate
             reactionSignalEvent:=true
             reactionFamily:=bullRxFamily
+            reactionKind:=isMiss?"MISS":"EARLY"
             reactionDir:=1
             reactionEpisodeId:=epId
             reactionPOIEngine:=bullRxEngine
@@ -2611,6 +2612,7 @@ if not na(bearRxPOIId)
         if allowed and not na(epId) and score>=minScore and f_signalCooldownOK(-1) and not duplicate
             reactionSignalEvent:=true
             reactionFamily:=bearRxFamily
+            reactionKind:=isMiss?"MISS":"EARLY"
             reactionDir:=-1
             reactionEpisodeId:=epId
             reactionPOIEngine:=bearRxEngine
@@ -2652,7 +2654,7 @@ if reactionSignalEvent
             bearCONTLastScore:=reactionScore
             bearCONTLastGrade:=reactionGrade
             contSignalCount+=1
-    lastSignalText:=(reactionFamily=="REV"?"REV ":"CONT ")+(reactionDir==1?"BULL":"BEAR")+" · REACTION · Q"+str.tostring(reactionScore)+" "+reactionGrade
+    lastSignalText:=(reactionFamily=="REV"?"REV ":"CONT ")+(reactionDir==1?"BULL":"BEAR")+" · "+reactionKind+" · Q"+str.tostring(reactionScore)+" "+reactionGrade
     array.push(signalHistory,SignalRecord.new(reactionFamily,reactionDir,reactionEpisodeId,reactionPOIEngine,reactionPOIId,bar_index,reactionScore))
     label rxLb=f_signalEntryMarker(reactionDir,reactionFamily,reactionScore,reactionGrade)
     if not na(rxLb)
@@ -2700,6 +2702,7 @@ if anySignal
                 array.set(riskPlans,n,oldVisual)
 
     string family=reactionSignalEvent?reactionFamily:(bullREVSignal or bearREVSignal?"REV":"CONT")
+    string signalSource=reactionSignalEvent?reactionKind:"NORMAL"
     int dir=reactionSignalEvent?reactionDir:(bullREVSignal or bullCONTSignal?1:-1)
     int epId=reactionSignalEvent?reactionEpisodeId:(family=="REV"?(dir==1?bullREVEpisodeId:bearREVEpisodeId):(dir==1?bullCONTEpisodeId:bearCONTEpisodeId))
     string poiEngine=reactionSignalEvent?reactionPOIEngine:(family=="REV"?(dir==1?bullREVPOIEngine:bearREVPOIEngine):(dir==1?bullCONTPOIEngine:bearCONTPOIEngine))
@@ -2747,7 +2750,8 @@ if anySignal
             int setupScore=reactionSignalEvent?reactionScore:(family=="REV"?(dir==1?bullREVLastScore:bearREVLastScore):(dir==1?bullCONTLastScore:bearCONTLastScore))
             string setupGrade=reactionSignalEvent?reactionGrade:(family=="REV"?(dir==1?bullREVLastGrade:bearREVLastGrade):(dir==1?bullCONTLastGrade:bearCONTLastGrade))
             string setupPOIType=reactionSignalEvent?reactionPOIType:(family=="REV"?(dir==1?bullREVPOIType:bearREVPOIType):(dir==1?bullCONTPOIType:bearCONTPOIType))
-            string eText=family+" "+(dir==1?"BUY":"SELL")+" · Q"+str.tostring(setupScore)+" "+setupGrade+"\nENTRY  "+str.tostring(entryPrice,format.mintick)+"\n"+setupPOIType+"#"+str.tostring(poiId)+" · EP"+str.tostring(epId)
+            string sourceText=signalSource=="NORMAL"?"":" · "+signalSource
+            string eText=family+" "+(dir==1?"BUY":"SELL")+sourceText+" · Q"+str.tostring(setupScore)+" "+setupGrade+"\nENTRY  "+str.tostring(entryPrice,format.mintick)+"\n"+setupPOIType+"#"+str.tostring(poiId)+" · EP"+str.tostring(epId)
             string sText="SL  "+str.tostring(stopPrice,format.mintick)
             string t1Text="T1  "+str.tostring(target1,format.mintick)+"  ·  "+str.tostring(rr1,"#.00")+"R"
             string t2Text="T2  "+str.tostring(target2,format.mintick)+"  ·  "+str.tostring(rr2,"#.00")+"R"
@@ -2760,8 +2764,8 @@ if anySignal
             string statusText=family+" "+(dir==1?"BUY":"SELL")+" · ACTIVE"
             stTag:=label.new(initialRight,statusY,statusText,xloc=xloc.bar_time,style=label.style_label_left,color=color.new(dir==1?bullSignalColor:bearSignalColor,15),textcolor=color.white,size=size.normal)
 
-    array.push(riskPlans,RiskPlan.new(nextRiskPlanId,family,dir,epId,poiEngine,poiId,bar_index,time,entryPrice,stopPrice,target1,target2,rr1,rr2,t1Source,t2Source,0,na,false,na,"ACTIVE",eLine,sLine,t1Line,t2Line,eTag,sTag,t1Tag,t2Tag,stTag))
-    f_addRecentEntryCard(nextRiskPlanId,family,dir,epId,poiEngine,poiId,time,entryPrice)
+    array.push(riskPlans,RiskPlan.new(nextRiskPlanId,family,signalSource,dir,epId,poiEngine,poiId,bar_index,time,entryPrice,stopPrice,target1,target2,rr1,rr2,t1Source,t2Source,0,na,false,na,"ACTIVE",eLine,sLine,t1Line,t2Line,eTag,sTag,t1Tag,t2Tag,stTag))
+    f_addRecentEntryCard(nextRiskPlanId,family,signalSource,dir,epId,poiEngine,poiId,time,entryPrice)
     nextRiskPlanId+=1
     riskPlanCount+=1
     newRiskPlanEvent:=true
@@ -2809,7 +2813,7 @@ if array.size(riskPlans)>0
                 p.state:=1
                 p.outcome:="T1_HIT"
                 t1ReachedCount+=1
-                f_updateRecentEntryCard(p.id,p.family,p.direction,p.episodeId,p.poiEngine,p.poiId,p.entry,"T1 HIT",na)
+                f_updateRecentEntryCard(p.id,p.family,p.source,p.direction,p.episodeId,p.poiEngine,p.poiId,p.entry,"T1 HIT",na)
 
         terminal:=p.state>=2
 
@@ -2845,14 +2849,7 @@ if array.size(riskPlans)>0
             lastOutcomeText:=p.family+" "+(bull?"BUY":"SELL")+" · "+p.outcome+(na(p.realizedR)?"":" · "+str.tostring(p.realizedR,"#.00")+"R")
 
             string terminalStatus=p.outcome=="T2_HIT"?"T2 HIT":p.outcome=="STOPPED"?"STOPPED":p.outcome=="EXPIRED"?"EXPIRED":p.outcome
-            f_updateRecentEntryCard(p.id,p.family,p.direction,p.episodeId,p.poiEngine,p.poiId,p.entry,terminalStatus,p.realizedR)
-
-            if showOutcomeLabels
-                float y=bull?low:high
-                label lb=label.new(time,y,lastOutcomeText,xloc=xloc.bar_time,style=label.style_none,textcolor=na(p.realizedR)?color.gray:p.realizedR>=0?bullSignalColor:bearSignalColor,size=f_textSize())
-                array.push(outcomeLabels,lb)
-                while array.size(outcomeLabels)>maxOutcomeLabels
-                    label.delete(array.shift(outcomeLabels))
+            f_updateRecentEntryCard(p.id,p.family,p.source,p.direction,p.episodeId,p.poiEngine,p.poiId,p.entry,terminalStatus,p.realizedR)
 
         int rightTime=terminal and not na(p.terminalTime)?p.terminalTime:time
 
