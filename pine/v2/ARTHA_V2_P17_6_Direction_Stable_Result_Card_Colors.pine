@@ -3,7 +3,7 @@ indicator("ARTHA v2 P17.6 — Visual Controls & Label Cleanup", shorttitle="ARTH
 
 //=============================================================================
 // ARTHA v2 — P17.6 VISUAL CONTROLS & LABEL CLEANUP
-// Built from P17.4.
+// Built from P17.5.
 // Adds independent bullish TP, bearish TP and SL color inputs.
 // Makes family/direction text on entry-detail labels optional and off by default.
 // Keeps recent-entry result-card color tied to original trade direction after completion.
