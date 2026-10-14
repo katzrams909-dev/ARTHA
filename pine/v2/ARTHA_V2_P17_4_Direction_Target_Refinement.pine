@@ -225,7 +225,7 @@ bool showRiskPlans=input.bool(true,"Show entry / stop / targets",group=G12)
 int riskPlanMaxAgeBars=input.int(80,"Maximum active plan age (bars)",minval=5,maxval=1000,group=G12)
 int maxRiskPlans=input.int(20,"Maximum internally tracked risk plans",minval=10,maxval=50,group=G12)
 color entryPlanColor=input.color(color.gray,"Entry line color",group=G12)
-color stopPlanColor=input.color(color.gray,"Stop line color",group=G12)
+color stopPlanColor=color.gray
 
 //=============================================================================
 // 13 TRADE MANAGEMENT / OUTCOMES
