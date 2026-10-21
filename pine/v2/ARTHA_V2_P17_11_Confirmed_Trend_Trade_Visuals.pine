@@ -2804,7 +2804,7 @@ if not na(bullRxPOIId)
         bool duplicate=f_signalDuplicate(bullRxFamily,epId,bullRxEngine,bullRxPOIId)
         bool earlyFrequencyOK=isMiss or f_earlyReentryAllowed(epId,lastBullEarlySignalBar,lastBullEarlyEpisodeId,lastStructuralResetBar,lastBearSignalBar)
         int rxPriority=isMiss?2:1
-        if allowed and earlyFrequencyOK and not na(epId) and score>=minScore and f_signalAdmissionOK(1,rxPriority) and not duplicate
+        if allowed and earlyFrequencyOK and not na(epId) and score>=minScore and f_signalAdmissionOK(1,rxPriority) and not duplicate and (not useTrendFilter or trendBullAllowed)
             reactionSignalEvent:=true
             reactionFamily:=bullRxFamily
             reactionKind:=isMiss?"MISS":"EARLY"
@@ -2845,7 +2845,7 @@ if not na(bearRxPOIId)
         bool duplicate=f_signalDuplicate(bearRxFamily,epId,bearRxEngine,bearRxPOIId)
         bool earlyFrequencyOK=isMiss or f_earlyReentryAllowed(epId,lastBearEarlySignalBar,lastBearEarlyEpisodeId,lastStructuralResetBar,lastBullSignalBar)
         int rxPriority=isMiss?2:1
-        if allowed and earlyFrequencyOK and not na(epId) and score>=minScore and f_signalAdmissionOK(-1,rxPriority) and not duplicate
+        if allowed and earlyFrequencyOK and not na(epId) and score>=minScore and f_signalAdmissionOK(-1,rxPriority) and not duplicate and (not useTrendFilter or trendBearAllowed)
             reactionSignalEvent:=true
             reactionFamily:=bearRxFamily
             reactionKind:=isMiss?"MISS":"EARLY"
