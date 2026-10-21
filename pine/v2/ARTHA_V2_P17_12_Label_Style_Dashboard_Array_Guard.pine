@@ -3446,49 +3446,49 @@ if barstate.islast
 
 
  //=============================================================================
- // SETUP DASHBOARD — reference-inspired state + active trade levels
- //=============================================================================
- setupDashPos=setupDashboardPosition=="Top Right"?position.top_right:setupDashboardPosition=="Top Left"?position.top_left:setupDashboardPosition=="Bottom Left"?position.bottom_left:position.bottom_right
- var table setupDashboard=table.new(setupDashPos,2,8,bgcolor=dashboardCellColor,frame_color=dashboardHeaderColor,frame_width=1,border_color=color.new(dashboardHeaderColor,35),border_width=1)
- string dashTextSize=setupDashboardSize=="Standard"?size.normal:size.small
- string dashTrendText=not useTrendFilter?"FILTER OFF":trendBullAllowed?"BULLISH":trendBearAllowed?"BEARISH":"NEUTRAL / BLOCKED"
- color dashTrendColor=not useTrendFilter?dashboardNeutralColor:trendBullAllowed?dashboardBullColor:trendBearAllowed?dashboardBearColor:dashboardNeutralColor
- string dashStructureText=confirmedStructureBias==1?"BULLISH":confirmedStructureBias==-1?"BEARISH":"NEUTRAL"
- color dashStructureColor=confirmedStructureBias==1?dashboardBullColor:confirmedStructureBias==-1?dashboardBearColor:dashboardNeutralColor
- string dashStateText=lastSignalText
- string dashEntry="—"
- string dashStop="—"
- string dashT1="—"
- string dashT2="—"
- string dashPlanState="NO ACTIVE PLAN"
- if array.size(riskPlans)>0
-     RiskPlan dashPlan=array.get(riskPlans,array.size(riskPlans)-1)
-     if dashPlan.state<2
-         dashEntry:=str.tostring(dashPlan.entry,format.mintick)
-         dashStop:=str.tostring(dashPlan.stop,format.mintick)
-         dashT1:=str.tostring(dashPlan.target1,format.mintick)
-         dashT2:=str.tostring(dashPlan.target2,format.mintick)
-         dashPlanState:=dashPlan.state==1?"T1 HIT · BE MANAGED":"ACTIVE"
- if barstate.islast
-     if showSetupDashboard
-         table.cell(setupDashboard,0,0,"ARTHA · SETUP",bgcolor=dashboardHeaderColor,text_color=color.white,text_size=dashTextSize,text_formatting=text.format_bold)
-         table.cell(setupDashboard,1,0,"P17.12",bgcolor=dashboardHeaderColor,text_color=color.white,text_size=dashTextSize,text_formatting=text.format_bold)
-         table.cell(setupDashboard,0,1,"TREND",bgcolor=dashboardCellColor,text_color=dashboardTextColor,text_size=dashTextSize)
-         table.cell(setupDashboard,1,1,dashTrendText,bgcolor=dashboardAltColor,text_color=dashTrendColor,text_size=dashTextSize,text_formatting=text.format_bold)
-         table.cell(setupDashboard,0,2,"STRUCTURE",bgcolor=dashboardCellColor,text_color=dashboardTextColor,text_size=dashTextSize)
-         table.cell(setupDashboard,1,2,dashStructureText,bgcolor=dashboardAltColor,text_color=dashStructureColor,text_size=dashTextSize,text_formatting=text.format_bold)
-         table.cell(setupDashboard,0,3,"SETUP / STATE",bgcolor=dashboardCellColor,text_color=dashboardTextColor,text_size=dashTextSize)
-         table.cell(setupDashboard,1,3,dashStateText,bgcolor=dashboardAltColor,text_color=color.white,text_size=dashTextSize)
-         table.cell(setupDashboard,0,4,"PLAN",bgcolor=dashboardCellColor,text_color=dashboardTextColor,text_size=dashTextSize)
-         table.cell(setupDashboard,1,4,dashPlanState,bgcolor=dashboardAltColor,text_color=dashPlanState=="ACTIVE" or dashPlanState=="T1 HIT · BE MANAGED"?dashboardBullColor:dashboardNeutralColor,text_size=dashTextSize)
-         table.cell(setupDashboard,0,5,"ENTRY",bgcolor=dashboardCellColor,text_color=dashboardTextColor,text_size=dashTextSize)
-         table.cell(setupDashboard,1,5,dashEntry,bgcolor=dashboardAltColor,text_color=entryPlanColor,text_size=dashTextSize)
-         table.cell(setupDashboard,0,6,"STOP / T1",bgcolor=dashboardCellColor,text_color=dashboardTextColor,text_size=dashTextSize)
-         table.cell(setupDashboard,1,6,dashStop+" / "+dashT1,bgcolor=dashboardAltColor,text_color=stopPlanColor,text_size=dashTextSize)
-         table.cell(setupDashboard,0,7,"T2",bgcolor=dashboardCellColor,text_color=dashboardTextColor,text_size=dashTextSize)
-         table.cell(setupDashboard,1,7,dashT2,bgcolor=dashboardAltColor,text_color=bullTargetColor,text_size=dashTextSize)
-     else
-         table.clear(setupDashboard,0,0,1,7)
+// SETUP DASHBOARD — reference-inspired state + active trade levels
+//=============================================================================
+setupDashPos=setupDashboardPosition=="Top Right"?position.top_right:setupDashboardPosition=="Top Left"?position.top_left:setupDashboardPosition=="Bottom Left"?position.bottom_left:position.bottom_right
+var table setupDashboard=table.new(setupDashPos,2,8,bgcolor=dashboardCellColor,frame_color=dashboardHeaderColor,frame_width=1,border_color=color.new(dashboardHeaderColor,35),border_width=1)
+string dashTextSize=setupDashboardSize=="Standard"?size.normal:size.small
+string dashTrendText=not useTrendFilter?"FILTER OFF":trendBullAllowed?"BULLISH":trendBearAllowed?"BEARISH":"NEUTRAL / BLOCKED"
+color dashTrendColor=not useTrendFilter?dashboardNeutralColor:trendBullAllowed?dashboardBullColor:trendBearAllowed?dashboardBearColor:dashboardNeutralColor
+string dashStructureText=confirmedStructureBias==1?"BULLISH":confirmedStructureBias==-1?"BEARISH":"NEUTRAL"
+color dashStructureColor=confirmedStructureBias==1?dashboardBullColor:confirmedStructureBias==-1?dashboardBearColor:dashboardNeutralColor
+string dashStateText=lastSignalText
+string dashEntry="—"
+string dashStop="—"
+string dashT1="—"
+string dashT2="—"
+string dashPlanState="NO ACTIVE PLAN"
+if array.size(riskPlans)>0
+    RiskPlan dashPlan=array.get(riskPlans,array.size(riskPlans)-1)
+    if dashPlan.state<2
+        dashEntry:=str.tostring(dashPlan.entry,format.mintick)
+        dashStop:=str.tostring(dashPlan.stop,format.mintick)
+        dashT1:=str.tostring(dashPlan.target1,format.mintick)
+        dashT2:=str.tostring(dashPlan.target2,format.mintick)
+        dashPlanState:=dashPlan.state==1?"T1 HIT · BE MANAGED":"ACTIVE"
+if barstate.islast
+    if showSetupDashboard
+        table.cell(setupDashboard,0,0,"ARTHA · SETUP",bgcolor=dashboardHeaderColor,text_color=color.white,text_size=dashTextSize,text_formatting=text.format_bold)
+        table.cell(setupDashboard,1,0,"P17.12",bgcolor=dashboardHeaderColor,text_color=color.white,text_size=dashTextSize,text_formatting=text.format_bold)
+        table.cell(setupDashboard,0,1,"TREND",bgcolor=dashboardCellColor,text_color=dashboardTextColor,text_size=dashTextSize)
+        table.cell(setupDashboard,1,1,dashTrendText,bgcolor=dashboardAltColor,text_color=dashTrendColor,text_size=dashTextSize,text_formatting=text.format_bold)
+        table.cell(setupDashboard,0,2,"STRUCTURE",bgcolor=dashboardCellColor,text_color=dashboardTextColor,text_size=dashTextSize)
+        table.cell(setupDashboard,1,2,dashStructureText,bgcolor=dashboardAltColor,text_color=dashStructureColor,text_size=dashTextSize,text_formatting=text.format_bold)
+        table.cell(setupDashboard,0,3,"SETUP / STATE",bgcolor=dashboardCellColor,text_color=dashboardTextColor,text_size=dashTextSize)
+        table.cell(setupDashboard,1,3,dashStateText,bgcolor=dashboardAltColor,text_color=color.white,text_size=dashTextSize)
+        table.cell(setupDashboard,0,4,"PLAN",bgcolor=dashboardCellColor,text_color=dashboardTextColor,text_size=dashTextSize)
+        table.cell(setupDashboard,1,4,dashPlanState,bgcolor=dashboardAltColor,text_color=dashPlanState=="ACTIVE" or dashPlanState=="T1 HIT · BE MANAGED"?dashboardBullColor:dashboardNeutralColor,text_size=dashTextSize)
+        table.cell(setupDashboard,0,5,"ENTRY",bgcolor=dashboardCellColor,text_color=dashboardTextColor,text_size=dashTextSize)
+        table.cell(setupDashboard,1,5,dashEntry,bgcolor=dashboardAltColor,text_color=entryPlanColor,text_size=dashTextSize)
+        table.cell(setupDashboard,0,6,"STOP / T1",bgcolor=dashboardCellColor,text_color=dashboardTextColor,text_size=dashTextSize)
+        table.cell(setupDashboard,1,6,dashStop+" / "+dashT1,bgcolor=dashboardAltColor,text_color=stopPlanColor,text_size=dashTextSize)
+        table.cell(setupDashboard,0,7,"T2",bgcolor=dashboardCellColor,text_color=dashboardTextColor,text_size=dashTextSize)
+        table.cell(setupDashboard,1,7,dashT2,bgcolor=dashboardAltColor,text_color=bullTargetColor,text_size=dashTextSize)
+    else
+        table.clear(setupDashboard,0,0,1,7)
 
 //=============================================================================
 // ALERTS — EXECUTION / OUTCOME
