@@ -1,0 +1,249 @@
+//@version=6
+indicator("ARTHA P04.0 — Session Engine", overlay=true, max_lines_count=300, max_labels_count=500)
+
+// P04.0 standalone validation prototype.
+// Tracks Asia, London and New York independently. Session state is calculated
+// regardless of display settings. A session high/low is only updated while the
+// session is active. At the first confirmed bar outside a session, the prior
+// session is considered closed and its levels stop extending.
+
+string GT="01 Session Time"
+string tzChoice=input.string("Exchange","Session timezone",options=["Exchange","UTC","America/New_York","Europe/London","Asia/Tokyo"],group=GT)
+string tz=tzChoice=="Exchange"?syminfo.timezone:tzChoice
+string asia=input.session("0000-0800:1234567","Asia session",group=GT)
+string london=input.session("0800-1630:1234567","London session",group=GT)
+string newYork=input.session("1330-2000:1234567","New York session",group=GT)
+
+string GL="02 Lifecycle"
+bool trackCompleted=input.bool(true,"Keep completed session levels",group=GL)
+int maxCompleted=input.int(12,"Maximum completed sessions per region",minval=1,maxval=30,group=GL)
+
+string GV="03 Display"
+bool showAsia=input.bool(true,"Show Asia",group=GV)
+bool showLondon=input.bool(true,"Show London",group=GV)
+bool showNewYork=input.bool(true,"Show New York",group=GV)
+bool showLabels=input.bool(true,"Show session labels",group=GV)
+bool showLevels=input.bool(true,"Show session high/low",group=GV)
+bool showHLLabels=input.bool(true,"Show H/L labels",group=GV)
+bool showCurrent=input.bool(true,"Show current session",group=GV)
+bool diagnostic=input.bool(false,"Diagnostic panel",group=GV)
+
+f_inSession(_session) =>
+    not na(time(timeframe.period,_session,tz))
+
+asiaIn=f_inSession(asia)
+londonIn=f_inSession(london)
+nyIn=f_inSession(newYork)
+
+// Explicit element types are required here. array.from(na, na, na) can infer
+// na as an integer array in Pine, which then rejects float assignments to hi/lo.
+// Session state arrays are indexed 0=Asia, 1=London, 2=New York.
+var bool[] active=array.from(false,false,false)
+var float[] hi=array.new_float(3,na)
+var float[] lo=array.new_float(3,na)
+var int[] startBar=array.new_int(3,na)
+var int[] lastBar=array.new_int(3,na)
+var int[] highBar=array.new_int(3,na)
+var int[] lowBar=array.new_int(3,na)
+
+var line[] hiLines=array.new_line()
+var line[] loLines=array.new_line()
+var label[] sessionLabels=array.new_label()
+var label[] highLabels=array.new_label()
+var label[] lowLabels=array.new_label()
+var int[] lineRegions=array.new_int()
+var int[] lineSessionEnds=array.new_int()
+
+var label[] currentSessionLabels=array.new_label(3)
+var label[] currentHighLabels=array.new_label(3)
+var label[] currentLowLabels=array.new_label(3)
+
+f_name(_region) =>
+    _region==0?"ASIA":_region==1?"LONDON":"NEW YORK"
+
+f_sessionVisible(_region) =>
+    _region==0?showAsia:_region==1?showLondon:showNewYork
+
+f_sessionText(_region) =>
+    f_name(_region)
+
+// Completed sessions receive explicit H/L labels at the actual extreme bars,
+// plus a session label at the session start. This makes old sessions visually
+// identifiable without relying on color alone.
+f_addCompleted(_region,_hi,_lo,_hiBar,_loBar,_endBar,_startBar) =>
+    if trackCompleted
+        line hLine=line.new(_hiBar,_hi,_endBar,_hi,xloc=xloc.bar_index)
+        line lLine=line.new(_loBar,_lo,_endBar,_lo,xloc=xloc.bar_index)
+        string name=f_name(_region)
+        label sLab=label.new(_startBar,_hi,name,style=label.style_none,size=size.tiny)
+        label hLab=label.new(_hiBar,_hi,name+" H",style=label.style_none,size=size.tiny)
+        label lLab=label.new(_loBar,_lo,name+" L",style=label.style_none,size=size.tiny)
+        array.push(hiLines,hLine)
+        array.push(loLines,lLine)
+        array.push(sessionLabels,sLab)
+        array.push(highLabels,hLab)
+        array.push(lowLabels,lLab)
+        array.push(lineRegions,_region)
+        array.push(lineSessionEnds,_endBar)
+
+// Previous active state is retained so session start/end transitions are exact.
+prevAsia=array.get(active,0)
+prevLondon=array.get(active,1)
+prevNY=array.get(active,2)
+
+f_process(_idx,_in) =>
+    bool was=array.get(active,_idx)
+    bool visible=f_sessionVisible(_idx)
+    string name=f_name(_idx)
+    if _in
+        if not was
+            array.set(active,_idx,true)
+            array.set(hi,_idx,high)
+            array.set(lo,_idx,low)
+            array.set(startBar,_idx,bar_index)
+            array.set(lastBar,_idx,bar_index)
+            array.set(highBar,_idx,bar_index)
+            array.set(lowBar,_idx,bar_index)
+            label oldSession=array.get(currentSessionLabels,_idx)
+            if not na(oldSession)
+                label.delete(oldSession)
+            label oldHigh=array.get(currentHighLabels,_idx)
+            if not na(oldHigh)
+                label.delete(oldHigh)
+            label oldLow=array.get(currentLowLabels,_idx)
+            if not na(oldLow)
+                label.delete(oldLow)
+            label newSession=label.new(bar_index,high,name,style=label.style_none,size=size.small)
+            label newHigh=label.new(bar_index,high,name+" H",style=label.style_none,size=size.tiny)
+            label newLow=label.new(bar_index,low,name+" L",style=label.style_none,size=size.tiny)
+            array.set(currentSessionLabels,_idx,newSession)
+            array.set(currentHighLabels,_idx,newHigh)
+            array.set(currentLowLabels,_idx,newLow)
+        else
+            float oldHi=array.get(hi,_idx)
+            float oldLo=array.get(lo,_idx)
+            if high>oldHi
+                array.set(hi,_idx,high)
+                array.set(highBar,_idx,bar_index)
+            if low<oldLo
+                array.set(lo,_idx,low)
+                array.set(lowBar,_idx,bar_index)
+            array.set(lastBar,_idx,bar_index)
+
+        // Current-session labels follow the live H/L while the session is active.
+        label sLab=array.get(currentSessionLabels,_idx)
+        label hLab=array.get(currentHighLabels,_idx)
+        label lLab=array.get(currentLowLabels,_idx)
+        if not na(sLab)
+            label.set_x(sLab,array.get(startBar,_idx))
+            label.set_y(sLab,array.get(hi,_idx))
+            label.set_text(sLab,showCurrent and showLabels and visible?name:"")
+        if not na(hLab)
+            label.set_x(hLab,array.get(highBar,_idx))
+            label.set_y(hLab,array.get(hi,_idx))
+            label.set_text(hLab,showCurrent and showHLLabels and visible?name+" H":"")
+        if not na(lLab)
+            label.set_x(lLab,array.get(lowBar,_idx))
+            label.set_y(lLab,array.get(lo,_idx))
+            label.set_text(lLab,showCurrent and showHLLabels and visible?name+" L":"")
+    else if was and barstate.isconfirmed
+        float endHi=array.get(hi,_idx)
+        float endLo=array.get(lo,_idx)
+        int endHiBar=array.get(highBar,_idx)
+        int endLoBar=array.get(lowBar,_idx)
+        int endBar=array.get(lastBar,_idx)
+        int beginBar=array.get(startBar,_idx)
+        f_addCompleted(_idx,endHi,endLo,endHiBar,endLoBar,endBar,beginBar)
+        array.set(active,_idx,false)
+        array.set(hi,_idx,na)
+        array.set(lo,_idx,na)
+        array.set(startBar,_idx,na)
+        array.set(lastBar,_idx,na)
+        array.set(highBar,_idx,na)
+        array.set(lowBar,_idx,na)
+        label sessionToDelete=array.get(currentSessionLabels,_idx)
+        if not na(sessionToDelete)
+            label.delete(sessionToDelete)
+        label highToDelete=array.get(currentHighLabels,_idx)
+        if not na(highToDelete)
+            label.delete(highToDelete)
+        label lowToDelete=array.get(currentLowLabels,_idx)
+        if not na(lowToDelete)
+            label.delete(lowToDelete)
+        array.set(currentSessionLabels,_idx,na)
+        array.set(currentHighLabels,_idx,na)
+        array.set(currentLowLabels,_idx,na)
+
+f_process(0,asiaIn)
+f_process(1,londonIn)
+f_process(2,nyIn)
+
+// The completion visual is bounded globally. This prevents three independent
+// session queues from silently exceeding Pine drawing limits.
+while array.size(hiLines)>maxCompleted*3
+    line.delete(array.shift(hiLines))
+    line.delete(array.shift(loLines))
+    label oldSession=array.shift(sessionLabels)
+    label oldHigh=array.shift(highLabels)
+    label oldLow=array.shift(lowLabels)
+    if not na(oldSession)
+        label.delete(oldSession)
+    if not na(oldHigh)
+        label.delete(oldHigh)
+    if not na(oldLow)
+        label.delete(oldLow)
+    array.shift(lineRegions)
+    array.shift(lineSessionEnds)
+
+// Rendering is purely derived from current state + user visibility.
+if array.size(hiLines)>0
+    for i=0 to array.size(hiLines)-1
+        int region=array.get(lineRegions,i)
+        bool visible=showLevels and f_sessionVisible(region)
+        line hLine=array.get(hiLines,i)
+        line lLine=array.get(loLines,i)
+        line.set_color(hLine,visible?color.gray:color.new(color.white,100))
+        line.set_color(lLine,visible?color.gray:color.new(color.white,100))
+        label sLab=array.get(sessionLabels,i)
+        label hLab=array.get(highLabels,i)
+        label lLab=array.get(lowLabels,i)
+        bool labelVisible=f_sessionVisible(region)
+        if not na(sLab)
+            label.set_text(sLab,showLabels and labelVisible?f_name(region):"")
+        if not na(hLab)
+            label.set_text(hLab,showHLLabels and labelVisible?f_name(region)+" H":"")
+        if not na(lLab)
+            label.set_text(lLab,showHLLabels and labelVisible?f_name(region)+" L":"")
+
+// Current-session diagnostics are calculated independently of rendering.
+int asiaStatus=asiaIn?1:0
+int londonStatus=londonIn?1:0
+int nyStatus=nyIn?1:0
+
+var table t=table.new(position.top_right,2,8)
+if barstate.islast
+    table.clear(t,0,0,1,7)
+    if diagnostic
+        table.cell(t,0,0,"P04.0")
+        table.cell(t,1,0,"SESSION ENGINE")
+        table.cell(t,0,1,"Timezone")
+        table.cell(t,1,1,tzChoice)
+        table.cell(t,0,2,"Asia")
+        table.cell(t,1,2,asiaStatus==1?"ACTIVE":"CLOSED")
+        table.cell(t,0,3,"London")
+        table.cell(t,1,3,londonStatus==1?"ACTIVE":"CLOSED")
+        table.cell(t,0,4,"New York")
+        table.cell(t,1,4,nyStatus==1?"ACTIVE":"CLOSED")
+        table.cell(t,0,5,"Completed records")
+        table.cell(t,1,5,str.tostring(array.size(hiLines)))
+        table.cell(t,0,6,"Asia H/L")
+        table.cell(t,1,6,asiaIn?str.tostring(array.get(hi,0))+" / "+str.tostring(array.get(lo,0)):"-")
+        table.cell(t,0,7,"London H/L")
+        table.cell(t,1,7,londonIn?str.tostring(array.get(hi,1))+" / "+str.tostring(array.get(lo,1)):"-")
+
+alertcondition(asiaIn and not prevAsia,"ARTHA Asia Open","Asia session opened")
+alertcondition(londonIn and not prevLondon,"ARTHA London Open","London session opened")
+alertcondition(nyIn and not prevNY,"ARTHA New York Open","New York session opened")
+alertcondition(not asiaIn and prevAsia and barstate.isconfirmed,"ARTHA Asia Close","Asia session closed")
+alertcondition(not londonIn and prevLondon and barstate.isconfirmed,"ARTHA London Close","London session closed")
+alertcondition(not nyIn and prevNY and barstate.isconfirmed,"ARTHA New York Close","New York session closed")

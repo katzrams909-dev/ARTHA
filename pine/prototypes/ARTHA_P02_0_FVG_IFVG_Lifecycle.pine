@@ -2,14 +2,14 @@
 indicator("ARTHA P02.0 — FVG / IFVG Lifecycle", overlay=true, max_boxes_count=200, max_labels_count=300)
 
 // P02.0 is a standalone validation prototype. It detects confirmed
-// three-candle FVGs, tracks their lifecycle, and promotes a filled FVG to an
-// IFVG candidate only after a confirmed polarity-crossing close.
-// No developing/current HTF data or future bars are used.
+// three-candle FVGs, tracks their lifecycle, and promotes a fully-filled FVG
+// to IFVG only after a confirmed close through the far boundary.
+// No future bars or developing HTF data are used.
 
 string GF="01 FVG"
 float minGapATR=input.float(0.10,"Minimum gap / ATR",minval=0,step=0.05,group=GF)
-float mitigationPct=input.float(100,"Fill threshold %",minval=1,maxval=100,step=1,group=GF)
-int maxZones=input.int(30,"Maximum active zones",minval=5,maxval=80,group=GF)
+float mitigationPct=input.float(50,"Mitigation threshold %",minval=1,maxval=99,step=1,group=GF)
+int maxZones=input.int(30,"Maximum tracked zones",minval=5,maxval=80,group=GF)
 bool requireDisplacement=input.bool(true,"Require displacement",group=GF)
 float dispATR=input.float(0.75,"Displacement body / ATR",minval=0,step=0.05,group=GF)
 
@@ -23,20 +23,21 @@ atr=ta.atr(14)
 body=math.abs(close-open)
 disp=atr>0?body/atr:0.0
 
-// A bullish FVG exists when the current confirmed low remains above the high
+// A bullish FVG exists when the confirmed current low remains above the high
 // two bars back. Bearish is the mirror condition.
 bullGap=low-high[2]
 bearGap=low[2]-high
 bullFVG=barstate.isconfirmed and not na(high[2]) and bullGap>0 and bullGap>=atr*minGapATR and (not requireDisplacement or disp>=dispATR)
 bearFVG=barstate.isconfirmed and not na(low[2]) and bearGap>0 and bearGap>=atr*minGapATR and (not requireDisplacement or disp>=dispATR)
 
-// zone arrays: direction 1 bull / -1 bear; state 0 active FVG, 1 IFVG, 2 filled
-// FVG awaiting flip; 3 invalidated IFVG.
+// States: 0 ACTIVE FVG, 1 FILLED / AWAITING FLIP, 2 IFVG, 3 INVALIDATED.
+// Direction is the original FVG polarity: 1 bullish / -1 bearish.
 var float[] tops=array.new_float()
 var float[] bots=array.new_float()
 var int[] dirs=array.new_int()
 var int[] states=array.new_int()
 var int[] born=array.new_int()
+var bool[] mitigatedFlags=array.new_bool()
 var box[] boxes=array.new_box()
 var label[] labels=array.new_label()
 
@@ -46,12 +47,18 @@ f_add(_top,_bot,_dir) =>
         box.delete(oldBox)
         label oldLabel=array.shift(labels)
         label.delete(oldLabel)
-        array.shift(tops),array.shift(bots),array.shift(dirs),array.shift(states),array.shift(born)
+        array.shift(tops)
+        array.shift(bots)
+        array.shift(dirs)
+        array.shift(states)
+        array.shift(born)
+        array.shift(mitigatedFlags)
     array.push(tops,_top)
     array.push(bots,_bot)
     array.push(dirs,_dir)
     array.push(states,0)
     array.push(born,bar_index)
+    array.push(mitigatedFlags,false)
     box b=box.new(bar_index,_top,bar_index,_bot)
     array.push(boxes,b)
     label l=label.new(bar_index,_top,_dir==1?"FVG ↑":"FVG ↓",style=label.style_none)
@@ -62,14 +69,14 @@ if bullFVG
 if bearFVG
     f_add(low[2],high,-1)
 
-// Lifecycle is evaluated only on confirmed bars. For a bullish FVG, price
-// entering the lower boundary is mitigation. A full fill occurs when price
-// reaches the opposite boundary. The first confirmed close through the
-// opposite side after a full fill creates an IFVG polarity flip.
 int activeCount=0
-int ifvgCount=0
 int filledCount=0
+int ifvgCount=0
 int invalidCount=0
+bool ifvgBullEvent=false
+bool ifvgBearEvent=false
+bool invalidBullEvent=false
+bool invalidBearEvent=false
 
 if array.size(tops)>0
     for i=array.size(tops)-1 to 0
@@ -78,52 +85,100 @@ if array.size(tops)>0
         int dir=array.get(dirs,i)
         int state=array.get(states,i)
         int bornBar=array.get(born,i)
+        bool wasMitigated=array.get(mitigatedFlags,i)
         box b=array.get(boxes,i)
         label l=array.get(labels,i)
-        box.set_right(b,bar_index)
-        if state==0
-            bool touched=dir==1?low<=top:high>=bot
-            bool fullyFilled=dir==1?low<=bot:high>=top
+
+        // Terminal objects stop extending at the invalidation bar.
+        if state!=3
+            box.set_right(b,bar_index)
+
+        // A newly-created FVG cannot be mitigated by its creation candle.
+        // Its first lifecycle evaluation begins on the next confirmed bar.
+        if barstate.isconfirmed and bar_index>bornBar and state==0
+            float height=math.max(top-bot,syminfo.mintick)
+            float penetration=dir==1?top-low:high-bot
+            float fillPct=math.max(0.0,math.min(100.0,penetration/height*100.0))
+            bool mitigated=fillPct>=mitigationPct
+            bool fullyFilled=fillPct>=100.0
+            bool polarityClose=dir==1?close<bot:close>top
+
+            if mitigated
+                array.set(mitigatedFlags,i,true)
+
             if fullyFilled
-                array.set(states,i,1)
-                label.set_text(l,dir==1?"IFVG ↓":"IFVG ↑")
-                label.set_x(l,bar_index)
-            else
-                if touched
-                    label.set_text(l,dir==1?"FVG ↑ · MIT":"FVG ↓ · MIT")
-        else if state==1
-            bool flipped=dir==1?close<bot:close>top
-            if flipped
-                // IFVG has been invalidated by a confirmed close through the
-                // original zone in the new polarity.
+                // A wick can establish the full-fill event. IFVG promotion
+                // requires the confirmed close to cross the far boundary.
+                if polarityClose
+                    array.set(states,i,2)
+                    if dir==1
+                        ifvgBullEvent:=true
+                    else
+                        ifvgBearEvent:=true
+                else
+                    array.set(states,i,1)
+
+        else if barstate.isconfirmed and bar_index>bornBar and state==1
+            bool polarityClose=dir==1?close<bot:close>top
+            if polarityClose
+                array.set(states,i,2)
+                if dir==1
+                    ifvgBullEvent:=true
+                else
+                    ifvgBearEvent:=true
+
+        else if barstate.isconfirmed and bar_index>bornBar and state==2
+            // Once inverted, the old opposite boundary becomes the
+            // invalidation boundary. A confirmed close back through it
+            // invalidates the IFVG; the object then stops extending.
+            bool invalidated=dir==1?close>top:close<bot
+            if invalidated
                 array.set(states,i,3)
-                label.set_text(l,dir==1?"IFVG ✕":"IFVG ✕")
-                label.set_x(l,bar_index)
+                if dir==1
+                    invalidBullEvent:=true
+                else
+                    invalidBearEvent:=true
+
+        // Rendering is derived from engine state, so visibility settings are
+        // reversible and cannot alter lifecycle calculations.
+        state:=array.get(states,i)
+        wasMitigated:=array.get(mitigatedFlags,i)
+        if state==0
+            string fvgText=dir==1?"FVG ↑":"FVG ↓"
+            if wasMitigated
+                fvgText:=dir==1?"FVG ↑ · MIT":"FVG ↓ · MIT"
+            label.set_text(l,showText?fvgText:"")
+        else if state==1
+            label.set_text(l,showText and showFilled?(dir==1?"FVG ↑ · FILLED":"FVG ↓ · FILLED"):"")
+        else if state==2
+            label.set_text(l,showText?(dir==1?"IFVG ↓":"IFVG ↑"):"")
+        else
+            label.set_text(l,showText and showFilled?"IFVG ✕":"")
+
         if state==0
             activeCount+=1
         else if state==1
-            ifvgCount+=1
-        else if state==2
             filledCount+=1
+        else if state==2
+            ifvgCount+=1
         else
             invalidCount+=1
 
-// Newly created FVGs are rendered; historical labels remain bounded by the
-// maxZones queue. Filled and invalidated objects remain for auditability but
-// can be hidden by the display setting.
-if not showZones and array.size(boxes)>0
+// Visual state is independent from calculation state. Turning visuals off
+// does not disable FVG/IFVG processing or event generation, and turning them
+// back on restores the derived rendering.
+if array.size(boxes)>0
     for i=0 to array.size(boxes)-1
-        box.set_bgcolor(array.get(boxes,i),color.new(color.white,100))
-        box.set_border_color(array.get(boxes,i),color.new(color.white,100))
+        int dir=array.get(dirs,i)
+        int state=array.get(states,i)
+        color fillColor=state==2?(dir==1?color.new(color.red,88):color.new(color.green,88)):dir==1?color.new(color.green,88):color.new(color.red,88)
+        color borderColor=state==2?(dir==1?color.red:color.green):(dir==1?color.green:color.red)
+        box.set_bgcolor(array.get(boxes,i),showZones?fillColor:color.new(color.white,100))
+        box.set_border_color(array.get(boxes,i),showZones?borderColor:color.new(color.white,100))
 
-if not showText and array.size(labels)>0
-    for i=0 to array.size(labels)-1
-        label.set_text(array.get(labels,i),"")
-
-// Diagnostic state.
-var table t=table.new(position.top_right,2,8)
+var table t=table.new(position.top_right,2,9)
 if barstate.islast
-    table.clear(t,0,0,1,7)
+    table.clear(t,0,0,1,8)
     if diagnostic
         table.cell(t,0,0,"P02.0")
         table.cell(t,1,0,"FVG / IFVG")
@@ -133,14 +188,20 @@ if barstate.islast
         table.cell(t,1,2,bearFVG?"YES":"NO")
         table.cell(t,0,3,"Active FVG")
         table.cell(t,1,3,str.tostring(activeCount))
-        table.cell(t,0,4,"Active IFVG")
-        table.cell(t,1,4,str.tostring(ifvgCount))
-        table.cell(t,0,5,"Filled")
-        table.cell(t,1,5,str.tostring(filledCount))
+        table.cell(t,0,4,"Filled / waiting")
+        table.cell(t,1,4,str.tostring(filledCount))
+        table.cell(t,0,5,"Active IFVG")
+        table.cell(t,1,5,str.tostring(ifvgCount))
         table.cell(t,0,6,"Invalidated")
         table.cell(t,1,6,str.tostring(invalidCount))
         table.cell(t,0,7,"Displacement")
         table.cell(t,1,7,str.tostring(disp,"#.##"))
+        table.cell(t,0,8,"Max zones")
+        table.cell(t,1,8,str.tostring(maxZones))
 
 alertcondition(bullFVG,"ARTHA Bullish FVG","Confirmed bullish FVG created")
 alertcondition(bearFVG,"ARTHA Bearish FVG","Confirmed bearish FVG created")
+alertcondition(ifvgBullEvent,"ARTHA Bullish FVG → IFVG","Bullish FVG confirmed polarity flip to IFVG")
+alertcondition(ifvgBearEvent,"ARTHA Bearish FVG → IFVG","Bearish FVG confirmed polarity flip to IFVG")
+alertcondition(invalidBullEvent,"ARTHA Bullish IFVG Invalidated","Bullish-origin IFVG invalidated by confirmed close")
+alertcondition(invalidBearEvent,"ARTHA Bearish IFVG Invalidated","Bearish-origin IFVG invalidated by confirmed close")

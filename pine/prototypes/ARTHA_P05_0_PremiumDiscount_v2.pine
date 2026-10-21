@@ -1,0 +1,343 @@
+//@version=6
+indicator("ARTHA P05.0 — Premium / Discount Engine v2", overlay=true, max_lines_count=150, max_labels_count=20)
+
+//=============================================================================
+// ARTHA P05.0 — PREMIUM / DISCOUNT ENGINE
+// Standalone validation prototype — lifecycle corrected.
+//
+// RANGE CONTRACT
+// - Uses confirmed external pivots only.
+// - LOW -> HIGH = bullish dealing range.
+// - HIGH -> LOW = bearish dealing range.
+// - A range becomes usable only when the second pivot is confirmed.
+// - Bullish range invalidation = confirmed close BELOW range low.
+// - Bearish range invalidation = confirmed close ABOVE range high.
+// - A newly confirmed opposite swing pair supersedes the prior active range.
+// - Invalidated/superseded ranges stop at the confirmation bar; they do not
+//   extend indefinitely.
+// - Premium/discount is context only. No entry signals are generated.
+// - Display settings do not alter calculation state.
+//=============================================================================
+
+//-----------------------------------------------------------------------------
+// INPUTS
+//-----------------------------------------------------------------------------
+string GS = "01 Structure"
+int externalStrength = input.int(5, "External pivot strength", minval=1, maxval=20, group=GS)
+
+string GL = "02 Location"
+string priceBasis = input.string("Close", "Location price", options=["Close", "HL2"], group=GL)
+float eqTolerancePct = input.float(0.10, "Equilibrium tolerance (% of range)", minval=0.0, maxval=10.0, step=0.05, group=GL)
+
+string GC = "03 Lifecycle"
+int maxRanges = input.int(12, "Maximum rendered ranges", minval=1, maxval=40, group=GC)
+
+string GV = "04 Display"
+bool showRange = input.bool(true, "Show dealing range", group=GV)
+bool showEQ = input.bool(true, "Show equilibrium", group=GV)
+bool showLocationText = input.bool(true, "Show location text", group=GV)
+bool diagnostic = input.bool(false, "Diagnostic panel", group=GV)
+
+//-----------------------------------------------------------------------------
+// CONFIRMED EXTERNAL PIVOTS
+//-----------------------------------------------------------------------------
+float pivotHigh = ta.pivothigh(high, externalStrength, externalStrength)
+float pivotLow  = ta.pivotlow(low, externalStrength, externalStrength)
+
+bool newHigh = barstate.isconfirmed and not na(pivotHigh)
+bool newLow  = barstate.isconfirmed and not na(pivotLow)
+int pivotBar = bar_index - externalStrength
+
+//-----------------------------------------------------------------------------
+// CONFIRMED SWING MEMORY
+//-----------------------------------------------------------------------------
+var float lastHigh = na
+var int lastHighBar = na
+var float lastLow = na
+var int lastLowBar = na
+
+//-----------------------------------------------------------------------------
+// ACTIVE RANGE STATE
+//
+// rangeState:
+// 0 = UNAVAILABLE
+// 1 = ACTIVE
+// 2 = INVALIDATED
+// 3 = SUPERSEDED
+//
+// rangeDirection:
+// 1 = BULLISH LOW -> HIGH
+// -1 = BEARISH HIGH -> LOW
+//-----------------------------------------------------------------------------
+var float rangeHigh = na
+var float rangeLow = na
+var int rangeHighBar = na
+var int rangeLowBar = na
+var int rangeDirection = 0
+var int rangeState = 0
+var int rangeCreatedBar = na
+var int rangeEndedBar = na
+var int rangeVersion = 0
+
+bool rangeActive = rangeState == 1
+
+// One-bar confirmed events.
+bool bullishRangeCreated = false
+bool bearishRangeCreated = false
+bool rangeInvalidated = false
+bool rangeSuperseded = false
+
+//-----------------------------------------------------------------------------
+// RENDERER STATE
+//
+// One line triplet is created per confirmed range.
+// Active triplet extends right.
+// On invalidation/supersession, its x2 is fixed to that confirmation bar and
+// extend is removed.
+//-----------------------------------------------------------------------------
+var line[] highLines = array.new_line()
+var line[] lowLines = array.new_line()
+var line[] eqLines = array.new_line()
+
+var line activeHighLine = na
+var line activeLowLine = na
+var line activeEqLine = na
+
+//-----------------------------------------------------------------------------
+// HELPERS
+//-----------------------------------------------------------------------------
+f_finishActiveLines(_endBar) =>
+    if not na(activeHighLine)
+        line.set_x2(activeHighLine, _endBar)
+        line.set_extend(activeHighLine, extend.none)
+    if not na(activeLowLine)
+        line.set_x2(activeLowLine, _endBar)
+        line.set_extend(activeLowLine, extend.none)
+    if not na(activeEqLine)
+        line.set_x2(activeEqLine, _endBar)
+        line.set_extend(activeEqLine, extend.none)
+
+//-----------------------------------------------------------------------------
+// 1) INVALIDATE THE RANGE THAT WAS ACTIVE COMING INTO THIS CONFIRMED BAR
+//-----------------------------------------------------------------------------
+if barstate.isconfirmed and rangeState == 1
+    bool invalidBull = rangeDirection == 1 and close < rangeLow
+    bool invalidBear = rangeDirection == -1 and close > rangeHigh
+
+    if invalidBull or invalidBear
+        rangeState := 2
+        rangeEndedBar := bar_index
+        rangeInvalidated := true
+        f_finishActiveLines(bar_index)
+
+//-----------------------------------------------------------------------------
+// 2) DISCOVER NEW CONFIRMED SWINGS AND BUILD A COHERENT OPPOSITE-SWING RANGE
+//-----------------------------------------------------------------------------
+bool createBull = false
+bool createBear = false
+
+float candidateHigh = na
+float candidateLow = na
+int candidateHighBar = na
+int candidateLowBar = na
+
+if newHigh
+    int thisHighBar = pivotBar
+    float thisHigh = pivotHigh
+
+    // LOW must occur before HIGH in actual pivot chronology.
+    if not na(lastLow) and not na(lastLowBar) and lastLowBar < thisHighBar
+        createBull := true
+        candidateLow := lastLow
+        candidateLowBar := lastLowBar
+        candidateHigh := thisHigh
+        candidateHighBar := thisHighBar
+
+    lastHigh := thisHigh
+    lastHighBar := thisHighBar
+
+if newLow
+    int thisLowBar = pivotBar
+    float thisLow = pivotLow
+
+    // HIGH must occur before LOW in actual pivot chronology.
+    if not na(lastHigh) and not na(lastHighBar) and lastHighBar < thisLowBar
+        createBear := true
+        candidateHigh := lastHigh
+        candidateHighBar := lastHighBar
+        candidateLow := thisLow
+        candidateLowBar := thisLowBar
+
+    lastLow := thisLow
+    lastLowBar := thisLowBar
+
+//-----------------------------------------------------------------------------
+// 3) ACTIVATE THE NEW RANGE
+//
+// If another range is still active, the new confirmed range supersedes it.
+// The old visuals terminate at THIS confirmation bar — not retroactively at
+// the pivot bar — preserving causal chart history.
+//-----------------------------------------------------------------------------
+bool createRange = (createBull or createBear) and candidateHigh > candidateLow
+
+if createRange
+    if rangeState == 1
+        rangeState := 3
+        rangeEndedBar := bar_index
+        rangeSuperseded := true
+        f_finishActiveLines(bar_index)
+
+    rangeHigh := candidateHigh
+    rangeLow := candidateLow
+    rangeHighBar := candidateHighBar
+    rangeLowBar := candidateLowBar
+    rangeDirection := createBull ? 1 : -1
+    rangeState := 1
+    rangeCreatedBar := bar_index
+    rangeEndedBar := na
+    rangeVersion += 1
+
+    bullishRangeCreated := createBull
+    bearishRangeCreated := createBear
+
+    int leftBar = math.min(rangeHighBar, rangeLowBar)
+    float eqAtCreation = (rangeHigh + rangeLow) * 0.5
+
+    activeHighLine := line.new(leftBar, rangeHigh, bar_index, rangeHigh, extend=extend.right)
+    activeLowLine := line.new(leftBar, rangeLow, bar_index, rangeLow, extend=extend.right)
+    activeEqLine := line.new(leftBar, eqAtCreation, bar_index, eqAtCreation, extend=extend.right, style=line.style_dashed)
+
+    array.push(highLines, activeHighLine)
+    array.push(lowLines, activeLowLine)
+    array.push(eqLines, activeEqLine)
+
+//-----------------------------------------------------------------------------
+// 4) SAME-BAR VALIDITY CHECK FOR A JUST-CONFIRMED RANGE
+//
+// Because the second pivot is confirmed only after externalStrength right-side
+// bars, price may already have crossed the opposite boundary by the time the
+// range becomes knowable. Such a stale range is immediately invalidated on the
+// same confirmed bar instead of being left falsely ACTIVE.
+//-----------------------------------------------------------------------------
+if barstate.isconfirmed and createRange and rangeState == 1
+    bool invalidNewBull = rangeDirection == 1 and close < rangeLow
+    bool invalidNewBear = rangeDirection == -1 and close > rangeHigh
+
+    if invalidNewBull or invalidNewBear
+        rangeState := 2
+        rangeEndedBar := bar_index
+        rangeInvalidated := true
+        f_finishActiveLines(bar_index)
+
+//-----------------------------------------------------------------------------
+// 5) BOUNDED VISUAL HISTORY
+//-----------------------------------------------------------------------------
+while array.size(highLines) > maxRanges
+    line.delete(array.shift(highLines))
+    line.delete(array.shift(lowLines))
+    line.delete(array.shift(eqLines))
+
+//-----------------------------------------------------------------------------
+// LOCATION STATE
+//-----------------------------------------------------------------------------
+bool rangeAvailable =
+     rangeState == 1 and
+     not na(rangeHigh) and
+     not na(rangeLow) and
+     rangeHigh > rangeLow and
+     rangeDirection != 0
+
+float equilibrium = rangeAvailable ? (rangeHigh + rangeLow) * 0.5 : na
+float rangeSize = rangeAvailable ? rangeHigh - rangeLow : na
+float locationPrice = priceBasis == "HL2" ? hl2 : close
+float eqTolerance = rangeAvailable ? rangeSize * (eqTolerancePct / 100.0) : na
+
+// 1 PREMIUM, 0 EQUILIBRIUM, -1 DISCOUNT, 9 UNAVAILABLE.
+int locationState = 9
+
+if rangeAvailable
+    if math.abs(locationPrice - equilibrium) <= eqTolerance
+        locationState := 0
+    else if locationPrice > equilibrium
+        locationState := 1
+    else
+        locationState := -1
+
+string locationText =
+     locationState == 1 ? "PREMIUM" :
+     locationState == 0 ? "EQUILIBRIUM" :
+     locationState == -1 ? "DISCOUNT" :
+     "UNAVAILABLE"
+
+string directionText =
+     rangeDirection == 1 ? "BULLISH" :
+     rangeDirection == -1 ? "BEARISH" :
+     "NONE"
+
+string stateText =
+     rangeState == 1 ? "ACTIVE" :
+     rangeState == 2 ? "INVALIDATED" :
+     rangeState == 3 ? "SUPERSEDED" :
+     "UNAVAILABLE"
+
+//-----------------------------------------------------------------------------
+// DERIVED RENDERING — VISIBILITY NEVER CHANGES CALCULATION STATE
+//-----------------------------------------------------------------------------
+if array.size(highLines) > 0
+    for i = 0 to array.size(highLines) - 1
+        line h = array.get(highLines, i)
+        line l = array.get(lowLines, i)
+        line e = array.get(eqLines, i)
+
+        line.set_color(h, showRange ? color.gray : color.new(color.white, 100))
+        line.set_color(l, showRange ? color.gray : color.new(color.white, 100))
+        line.set_color(e, showEQ ? color.gray : color.new(color.white, 100))
+
+var label locationLabel = na
+
+if barstate.islast
+    if na(locationLabel)
+        locationLabel := label.new(bar_index, close, "", style=label.style_none, size=size.small)
+
+    label.set_xy(locationLabel, bar_index, locationPrice)
+    label.set_text(locationLabel, showLocationText and rangeAvailable ? locationText : "")
+
+//-----------------------------------------------------------------------------
+// DIAGNOSTIC PANEL
+//-----------------------------------------------------------------------------
+var table t = table.new(position.top_right, 2, 11)
+
+if barstate.islast
+    table.clear(t, 0, 0, 1, 10)
+
+    if diagnostic
+        table.cell(t, 0, 0, "P05.0")
+        table.cell(t, 1, 0, "PREMIUM / DISCOUNT")
+        table.cell(t, 0, 1, "State")
+        table.cell(t, 1, 1, stateText)
+        table.cell(t, 0, 2, "Direction")
+        table.cell(t, 1, 2, directionText)
+        table.cell(t, 0, 3, "High")
+        table.cell(t, 1, 3, na(rangeHigh) ? "-" : str.tostring(rangeHigh))
+        table.cell(t, 0, 4, "Low")
+        table.cell(t, 1, 4, na(rangeLow) ? "-" : str.tostring(rangeLow))
+        table.cell(t, 0, 5, "EQ")
+        table.cell(t, 1, 5, rangeAvailable ? str.tostring(equilibrium) : "-")
+        table.cell(t, 0, 6, "Location")
+        table.cell(t, 1, 6, locationText)
+        table.cell(t, 0, 7, "Version")
+        table.cell(t, 1, 7, str.tostring(rangeVersion))
+        table.cell(t, 0, 8, "Created bar")
+        table.cell(t, 1, 8, na(rangeCreatedBar) ? "-" : str.tostring(rangeCreatedBar))
+        table.cell(t, 0, 9, "Ended bar")
+        table.cell(t, 1, 9, na(rangeEndedBar) ? "-" : str.tostring(rangeEndedBar))
+        table.cell(t, 0, 10, "Strength")
+        table.cell(t, 1, 10, str.tostring(externalStrength))
+
+//-----------------------------------------------------------------------------
+// ALERTABLE CONTEXT EVENTS ONLY — NOT ENTRY SIGNALS
+//-----------------------------------------------------------------------------
+alertcondition(bullishRangeCreated, "ARTHA Bullish Dealing Range", "New confirmed bullish dealing range")
+alertcondition(bearishRangeCreated, "ARTHA Bearish Dealing Range", "New confirmed bearish dealing range")
+alertcondition(rangeInvalidated, "ARTHA Dealing Range Invalidated", "Active dealing range invalidated by confirmed close")
+alertcondition(rangeSuperseded, "ARTHA Dealing Range Superseded", "Active dealing range superseded by a newly confirmed range")
