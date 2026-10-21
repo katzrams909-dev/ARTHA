@@ -3448,7 +3448,7 @@ if barstate.islast
  //=============================================================================
  // SETUP DASHBOARD — reference-inspired state + active trade levels
  //=============================================================================
- position setupDashPos=setupDashboardPosition=="Top Right"?position.top_right:setupDashboardPosition=="Top Left"?position.top_left:setupDashboardPosition=="Bottom Left"?position.bottom_left:position.bottom_right
+ setupDashPos=setupDashboardPosition=="Top Right"?position.top_right:setupDashboardPosition=="Top Left"?position.top_left:setupDashboardPosition=="Bottom Left"?position.bottom_left:position.bottom_right
  var table setupDashboard=table.new(setupDashPos,2,8,bgcolor=dashboardCellColor,frame_color=dashboardHeaderColor,frame_width=1,border_color=color.new(dashboardHeaderColor,35),border_width=1)
  string dashTextSize=setupDashboardSize=="Standard"?size.normal:size.small
  string dashTrendText=not useTrendFilter?"FILTER OFF":trendBullAllowed?"BULLISH":trendBearAllowed?"BEARISH":"NEUTRAL / BLOCKED"
