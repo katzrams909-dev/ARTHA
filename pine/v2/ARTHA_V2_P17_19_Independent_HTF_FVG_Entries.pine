@@ -97,6 +97,7 @@ bool requireHTFPOIAlignment=input.bool(false,"Require HTF FVG alignment for nati
 bool enableHTFPOIEntries=input.bool(true,"Allow independent HTF FVG reaction entries",group=GMTF)
 bool allowNativeEntries=input.bool(true,"Keep native REV / CONT entries",group=GMTF)
 float htfEntryMinCloseLocation=input.float(0.60,"HTF FVG reaction close strength",minval=0.50,maxval=0.95,step=0.05,group=GMTF)
+float htfMaxStopDistanceATR=input.float(12.0,"HTF-POI maximum stop / chart ATR",minval=1.0,maxval=100.0,step=1.0,group=GMTF)
 bool showHTF15mZones=input.bool(true,"Show 15m HTF FVG rectangles",group=GMTF)
 bool showHTF1hZones=input.bool(true,"Show 1H HTF FVG rectangles",group=GMTF)
 bool showHTFSelectedZones=input.bool(true,"Show custom selected-HTF FVG rectangles",group=GMTF)
@@ -3387,7 +3388,7 @@ for eventSlot=0 to 1
 
         float minT2Separation=math.max(atr*minTargetSeparationATR,syminfo.mintick)
         float maxT1AllowedR=riskDistance>0?maxLiquidityTargetR-minT2Separation/riskDistance:na
-        bool stopDistanceAccepted=not na(atr) and atr>0 and riskDistance<=atr*maxStopDistanceATR
+        bool stopDistanceAccepted=not na(atr) and atr>0 and riskDistance<=atr*(isHTFEvent?htfMaxStopDistanceATR:maxStopDistanceATR)
         bool targetGeometryAccepted=riskDistance>0 and (primaryTargetMode=="Fixed R"?(fixedTarget2R>fixedTarget1R):(not na(maxT1AllowedR) and maxT1AllowedR>=minTarget1R and maxLiquidityTargetR>=minTarget2R))
         bool mtfAligned=f_mtfPOIMatch(dir,entryPrice)
         bool mtfAlignmentAccepted=isHTFEvent or not (requireHTFPOIAlignment and mtfPOIEnabled) or mtfAligned
@@ -3543,7 +3544,7 @@ for eventSlot=0 to 1
             lastPlanRR2:=rr2
             lastPlanText:=family+" "+(dir==1?"BUY":"SELL")+" · T1 "+t1Source+" · T2 "+t2Source
         else
-            string rejectionReason=not stopSideAccepted?"STOP WRONG SIDE":not mtfAlignmentAccepted?"HTF FVG MISMATCH":not stopDistanceAccepted?"STOP > "+str.tostring(maxStopDistanceATR,"#.##")+" ATR":"TARGET RR LIMITS"
+            string rejectionReason=not stopSideAccepted?"STOP WRONG SIDE":not mtfAlignmentAccepted?"HTF FVG MISMATCH":not stopDistanceAccepted?"STOP > "+str.tostring(isHTFEvent?htfMaxStopDistanceATR:maxStopDistanceATR,"#.##")+" ATR":"TARGET RR LIMITS"
             lastPlanText:="RISK FILTER · "+rejectionReason
             lastSignalText:="RISK FILTER · "+rejectionReason
             if not na(planSignalMarker)
