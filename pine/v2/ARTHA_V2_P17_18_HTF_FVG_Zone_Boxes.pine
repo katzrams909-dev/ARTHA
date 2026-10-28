@@ -1259,14 +1259,16 @@ bool mtfBullZone=mtfPOIEnabled and mtfFVGDir==1 and not na(mtfFVGTop) and not na
 bool mtfBearZone=mtfPOIEnabled and mtfFVGDir==-1 and not na(mtfFVGTop) and not na(mtfFVGBottom)
 // Confirmed HTF zones are visualized with bounded rectangles, not stepped plots.
 // Display switches do not change signal admission, HTF context, or targets.
-f_renderHTFBox(box activeBox,array<box> history,int direction,float zoneTop,float zoneBottom,int origin,bool visible,string sourceTag) =>
+f_renderHTFBox(box activeBox,int priorOrigin,array<box> history,int direction,float zoneTop,float zoneBottom,int origin,bool visible,string sourceTag) =>
     box result=activeBox
+    int activeOrigin=priorOrigin
     bool usable=visible and direction!=0 and not na(origin) and not na(zoneTop) and not na(zoneBottom)
     if usable
-        bool newZone=na(result) or box.get_left(result)!=origin or box.get_top(result)!=zoneTop or box.get_bottom(result)!=zoneBottom
+        bool newZone=na(result) or activeOrigin!=origin or box.get_top(result)!=zoneTop or box.get_bottom(result)!=zoneBottom
         if newZone
             color c=direction==1?htfBullZoneColor:htfBearZoneColor
-            result:=box.new(left=origin,top=zoneTop,right=time,bottom=zoneBottom,xloc=xloc.bar_time,extend=extend.none,bgcolor=color.new(c,htfFVGZoneTransparency),border_color=color.new(c,30),text=sourceTag+" FVG",text_color=c,text_size=size.tiny,text_halign=text.align_right,text_valign=text.align_center)
+            result:=box.new(left=time,top=zoneTop,right=time,bottom=zoneBottom,xloc=xloc.bar_time,extend=extend.none,bgcolor=color.new(c,htfFVGZoneTransparency),border_color=color.new(c,30),text=sourceTag+" FVG",text_color=c,text_size=size.tiny,text_halign=text.align_right,text_valign=text.align_center)
+            activeOrigin:=origin
             array.push(history,result)
             while array.size(history)>maxHTFZoneBoxes
                 box old=array.shift(history)
@@ -1275,7 +1277,8 @@ f_renderHTFBox(box activeBox,array<box> history,int direction,float zoneTop,floa
             box.set_right(result,time)
     else
         result:=na
-    result
+        activeOrigin:=na
+    [result,activeOrigin]
 
 bool valid15=timeframe.in_seconds(timeframe.period)<timeframe.in_seconds("15")
 bool valid60=timeframe.in_seconds(timeframe.period)<timeframe.in_seconds("60")
@@ -1286,10 +1289,19 @@ var array<box> mtfCustomHistory=array.new_box()
 var box mtf15Active=na
 var box mtf60Active=na
 var box mtfCustomActive=na
+var int mtf15ActiveOrigin=na
+var int mtf60ActiveOrigin=na
+var int mtfCustomActiveOrigin=na
 if barstate.isconfirmed
-    mtf15Active:=f_renderHTFBox(mtf15Active,mtf15History,mtf15Dir,mtf15Top,mtf15Bottom,mtf15Origin,enableMTFContext and showHTF15mZones and valid15,"15m")
-    mtf60Active:=f_renderHTFBox(mtf60Active,mtf60History,mtf60Dir,mtf60Top,mtf60Bottom,mtf60Origin,enableMTFContext and showHTF1hZones and valid60,"1H")
-    mtfCustomActive:=f_renderHTFBox(mtfCustomActive,mtfCustomHistory,mtfFVGDir,mtfFVGTop,mtfFVGBottom,mtfFVGOrigin,enableMTFContext and showHTFSelectedZones and mtfPOIValidTF and customTF,mtfPOITimeframe)
+    [next15Box,next15Origin]=f_renderHTFBox(mtf15Active,mtf15ActiveOrigin,mtf15History,mtf15Dir,mtf15Top,mtf15Bottom,mtf15Origin,enableMTFContext and showHTF15mZones and valid15,"15m")
+    mtf15Active:=next15Box
+    mtf15ActiveOrigin:=next15Origin
+    [next60Box,next60Origin]=f_renderHTFBox(mtf60Active,mtf60ActiveOrigin,mtf60History,mtf60Dir,mtf60Top,mtf60Bottom,mtf60Origin,enableMTFContext and showHTF1hZones and valid60,"1H")
+    mtf60Active:=next60Box
+    mtf60ActiveOrigin:=next60Origin
+    [nextCustomBox,nextCustomOrigin]=f_renderHTFBox(mtfCustomActive,mtfCustomActiveOrigin,mtfCustomHistory,mtfFVGDir,mtfFVGTop,mtfFVGBottom,mtfFVGOrigin,enableMTFContext and showHTFSelectedZones and mtfPOIValidTF and customTF,mtfPOITimeframe)
+    mtfCustomActive:=nextCustomBox
+    mtfCustomActiveOrigin:=nextCustomOrigin
 
 
 f_mtfPOIMatch(int dir,float signalPrice) =>
