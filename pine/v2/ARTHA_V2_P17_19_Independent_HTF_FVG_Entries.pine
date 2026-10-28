@@ -308,7 +308,7 @@ string G13="13 Trade Management"
 string outcomeModel=input.string("Four-stage liquidity ladder","Outcome model",options=["No partial","50% T1 + BE remainder","Four-stage liquidity ladder"],group=G13)
 bool showRiskLevelTags=input.bool(true,"Show ENTRY / SL / T1 / T2 labels",group=G13)
 bool showFamilyDirectionInEntryTag=input.bool(false,"Show REV/CONT BUY/SELL in entry label",group=G13)
-bool showOnlyLatestActivePlan=input.bool(true,"Draw only newest active plan",group=G13)
+bool showOnlyLatestActivePlan=input.bool(false,"Draw only newest active plan",group=G13)
 bool showPlanStatusTag=input.bool(false,"Show active plan status tag",group=G13)
 bool showRecentEntryResults=input.bool(true,"Show recent entries / results",group=G13)
 int recentEntryResultCount=input.int(4,"Recent entries / results to keep",minval=1,maxval=10,group=G13)
@@ -3345,7 +3345,10 @@ string htfEntryFamily=(mtfFVGDir==xTrend)?"CONT":"REV"
 // Dedicated HTF reaction score, not inherited native REV/CONT predicate score.
 int htfEntryScore=math.min(100,70+(math.abs(close-open)>=atr*0.4?10:0)+(mtfFVGDir==xTrend?10:0)+(math.abs(close-open)>=atr*0.8?10:0))
 bool anySignal=bullREVSignal or bearREVSignal or bullCONTSignal or bearCONTSignal
-// Process HTF event first so native chart entry remains latest if both occur.
+// Process HTF event first; each accepted event creates its own RiskPlan.
+// With latest-only drawings disabled by default, both remain visible.
+// HTF reaction family describes directional alignment with local xTrend,
+// not satisfaction of the native REV/CONT pattern predicates.
 for eventSlot=0 to 1
     bool isHTFEvent=eventSlot==0
     if (isHTFEvent and htfEntryEvent) or (not isHTFEvent and anySignal and allowNativeEntries)
@@ -3388,7 +3391,8 @@ for eventSlot=0 to 1
         bool targetGeometryAccepted=riskDistance>0 and (primaryTargetMode=="Fixed R"?(fixedTarget2R>fixedTarget1R):(not na(maxT1AllowedR) and maxT1AllowedR>=minTarget1R and maxLiquidityTargetR>=minTarget2R))
         bool mtfAligned=f_mtfPOIMatch(dir,entryPrice)
         bool mtfAlignmentAccepted=isHTFEvent or not (requireHTFPOIAlignment and mtfPOIEnabled) or mtfAligned
-        bool planAccepted=stopDistanceAccepted and targetGeometryAccepted and mtfAlignmentAccepted
+        bool stopSideAccepted=dir==1?stopPrice<entryPrice:stopPrice>entryPrice
+        bool planAccepted=stopSideAccepted and stopDistanceAccepted and targetGeometryAccepted and mtfAlignmentAccepted
 
         if planAccepted
             if showOnlyLatestActivePlan and array.size(riskPlans)>0
@@ -3539,7 +3543,7 @@ for eventSlot=0 to 1
             lastPlanRR2:=rr2
             lastPlanText:=family+" "+(dir==1?"BUY":"SELL")+" · T1 "+t1Source+" · T2 "+t2Source
         else
-            string rejectionReason=not mtfAlignmentAccepted?"HTF FVG MISMATCH":not stopDistanceAccepted?"STOP > "+str.tostring(maxStopDistanceATR,"#.##")+" ATR":"TARGET RR LIMITS"
+            string rejectionReason=not stopSideAccepted?"STOP WRONG SIDE":not mtfAlignmentAccepted?"HTF FVG MISMATCH":not stopDistanceAccepted?"STOP > "+str.tostring(maxStopDistanceATR,"#.##")+" ATR":"TARGET RR LIMITS"
             lastPlanText:="RISK FILTER · "+rejectionReason
             lastSignalText:="RISK FILTER · "+rejectionReason
             if not na(planSignalMarker)
