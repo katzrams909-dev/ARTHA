@@ -102,7 +102,6 @@ bool showHTF15mZones=input.bool(true,"Show 15m HTF FVG rectangles",group=GMTF)
 bool showHTF1hZones=input.bool(true,"Show 1H HTF FVG rectangles",group=GMTF)
 bool showHTFSelectedZones=input.bool(true,"Show custom selected-HTF FVG rectangles",group=GMTF)
 bool showHTFOBBridge=input.bool(true,"Show selected HTF OB / BB candidates (preview)",group=GMTF)
-bool showHTFBridgeDiagnostics=input.bool(true,"Show HTF candidate provenance label",group=GMTF)
 int htfCandidateOriginSearch=input.int(8,"HTF OB opposite-candle search",minval=1,maxval=20,group=GMTF)
 int maxHTFZoneBoxes=input.int(12,"Maximum historical zones per timeframe",minval=1,maxval=30,group=GMTF)
 int htfFVGZoneTransparency=input.int(87,"HTF FVG fill transparency",minval=0,maxval=100,group=GMTF)
@@ -1331,7 +1330,7 @@ f_htfOBBridgeState() =>
     var int priorDispBar=na
     var int priorDispDir=0
     var int lastBreakDir=0
-    float a=ta.atr(atrLength)
+    float a=ta.atr(14)
     float ph=ta.pivothigh(high,xLen,xLen)
     float pl=ta.pivotlow(low,xLen,xLen)
     float lastHigh=ta.valuewhen(not na(ph),ph,0)
