@@ -3532,7 +3532,7 @@ f_createShadowTouches() =>
             UnifiedPOI p=array.get(unifiedPOIs,k)
             bool qualified=not shadowOnlyPrimary or (p.primary and not na(p.episodeId))
             float midpoint=(p.top+p.bottom)*0.5
-            bool crossed=p.direction==1?low<=midpoint:high>=midpoint
+            bool crossed=low<=midpoint and high>=midpoint
             string key=f_midpointKey(p)
             if qualified and bar_index>f_midpointPhaseBar(p) and crossed and not f_shadowSeen(key)
                 if array.size(midpointSeenKeys)>=shadowSeenKeyLimit
