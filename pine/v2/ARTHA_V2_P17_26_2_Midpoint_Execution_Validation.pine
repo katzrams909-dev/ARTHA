@@ -3401,12 +3401,9 @@ var array<int> shadowRWinBySide=array.from(0,0,0,0,0,0,0,0)
 var array<int> shadowRLossBySide=array.from(0,0,0,0,0,0,0,0)
 var array<int> shadowRAmbBySide=array.from(0,0,0,0,0,0,0,0)
 var array<int> shadowRTimeoutBySide=array.from(0,0,0,0,0,0,0,0)
-var int shadowCapacityBlocked=0
-var int shadowLedgerBlocked=0
-var int shadowReclaimCapacityBlocked=0
-var int shadowTouchUncertain=0
-var int shadowEarlyMatched=0
-var int shadowRetiredOnTouchUnknown=0
+// Stats indices: 0 midpoint capacity, 1 key limit, 2 reclaim capacity,
+// 3 touch-bar uncertain, 4 existing EARLY matched.
+var array<int> shadowStats=array.from(0,0,0,0,0)
 
 f_shadowTypeIndex(string kind) =>
     kind=="OB"?0:kind=="BB"?1:kind=="FVG"?2:3
@@ -3471,7 +3468,7 @@ f_updateExecutionAudit() =>
                                 if array.size(reclaimTrials)<shadowMaxRecords
                                     array.push(reclaimTrials,ShadowReclaimTrial.new(t.direction,t.poiType,close,t.stop,close+t.direction*risk,bar_index))
                                 else
-                                    shadowReclaimCapacityBlocked+=1
+                                    array.set(shadowStats,2,array.get(shadowStats,2)+1)
                 // Keep resolved touch trial until its EARLY matching window
                 // passes; then remove WITHOUT forgetting its unique phase key.
                 if t.outcome!=0 and age>shadowReclaimWindow
@@ -3515,9 +3512,9 @@ f_armMidpointAudit() =>
             string key=f_shadowKey(p)
             if eligible and crossed and bar_index>f_shadowPhaseBar(p) and not map.contains(midpointSeenAt,key)
                 if map.size(midpointSeenAt)>=shadowSeenKeyLimit
-                    shadowLedgerBlocked+=1
+                    array.set(shadowStats,1,array.get(shadowStats,1)+1)
                 else if array.size(midpointTrials)>=shadowMaxRecords
-                    shadowCapacityBlocked+=1
+                    array.set(shadowStats,0,array.get(shadowStats,0)+1)
                 else
                     float buffer=math.max(nz(atr,syminfo.mintick)*shadowStopBufferATR,syminfo.mintick)
                     float stop=p.direction==1?p.bottom-buffer:p.top+buffer
@@ -3533,7 +3530,7 @@ f_armMidpointAudit() =>
                         // OHLC cannot prove whether the order filled first.
                         bool uncertain=stopSame or targetSame
                         if uncertain
-                            shadowTouchUncertain+=1
+                            array.set(shadowStats,3,array.get(shadowStats,3)+1)
                             array.set(shadowAmbBySide,bucket,array.get(shadowAmbBySide,bucket)+1)
                         array.push(midpointTrials,ShadowMidpointTrial.new(key,p.direction,p.poiType,midpoint,stop,target,bar_index,uncertain?3:0,false))
 
@@ -3543,8 +3540,9 @@ f_matchExistingEarlyAudit() =>
         if map.contains(midpointSeenAt,key)
             int firstTouch=map.get(midpointSeenAt,key)
             if bar_index>=firstTouch and bar_index-firstTouch<=shadowReclaimWindow
-                shadowEarlyMatched+=1
+                array.set(shadowStats,4,array.get(shadowStats,4)+1)
 
+var table shadowAuditTable=table.new(position.bottom_left,7,14,border_width=1)
 f_renderExecutionAudit() =>
     if showShadowAuditTable
         color hd=color.rgb(35,45,60)
@@ -3603,15 +3601,15 @@ f_renderExecutionAudit() =>
         table.cell(shadowAuditTable,3,10,"RECL %",text_color=color.silver)
         table.cell(shadowAuditTable,4,10,rDecided>0?str.tostring(100.0*totalRWin/rDecided,"#.0")+"%":"—",text_color=color.white)
         table.cell(shadowAuditTable,0,11,"Touch uncertain",text_color=color.silver)
-        table.cell(shadowAuditTable,1,11,str.tostring(shadowTouchUncertain),text_color=color.orange)
+        table.cell(shadowAuditTable,1,11,str.tostring(array.get(shadowStats,3)),text_color=color.orange)
         table.cell(shadowAuditTable,3,11,"EARLY match",text_color=color.silver)
-        table.cell(shadowAuditTable,4,11,str.tostring(shadowEarlyMatched),text_color=color.white)
+        table.cell(shadowAuditTable,4,11,str.tostring(array.get(shadowStats,4)),text_color=color.white)
         table.cell(shadowAuditTable,0,12,"Active M / R",text_color=color.silver)
         table.cell(shadowAuditTable,1,12,str.tostring(array.size(midpointTrials))+"/"+str.tostring(array.size(reclaimTrials)),text_color=color.white)
         table.cell(shadowAuditTable,3,12,"Capacity skip",text_color=color.silver)
-        table.cell(shadowAuditTable,4,12,str.tostring(shadowCapacityBlocked+shadowReclaimCapacityBlocked),text_color=color.orange)
+        table.cell(shadowAuditTable,4,12,str.tostring(array.get(shadowStats,0)+array.get(shadowStats,2)),text_color=color.orange)
         table.cell(shadowAuditTable,0,13,"Ledger limit",text_color=color.silver)
-        table.cell(shadowAuditTable,1,13,str.tostring(shadowLedgerBlocked),text_color=color.orange)
+        table.cell(shadowAuditTable,1,13,str.tostring(array.get(shadowStats,1)),text_color=color.orange)
         table.cell(shadowAuditTable,3,13,"Seen keys",text_color=color.silver)
         table.cell(shadowAuditTable,4,13,str.tostring(map.size(midpointSeenAt)),text_color=color.white)
 
@@ -3620,7 +3618,6 @@ f_renderExecutionAudit() =>
 f_updateExecutionAudit()
 f_armMidpointAudit()
 f_matchExistingEarlyAudit()
-var table shadowAuditTable=table.new(position.bottom_left,7,14,border_width=1)
 if barstate.islast
     f_renderExecutionAudit()
 
