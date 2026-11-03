@@ -2042,8 +2042,10 @@ if array.size(orderBlocks)>0
                 retiredOBBBCount+=1
 
         bool active=z.state<2
-        bool isOB=z.state==0
-        bool isBB=z.state==1
+        // Preserve the last phase identity after retirement so audit labels
+        // show the real OB or BB, not an arbitrary fallback type.
+        bool isBB=z.state==1 or (z.state==2 and z.phaseStartBar!=z.bornBar)
+        bool isOB=not isBB
         bool visualBull=isOB?z.direction==1:z.direction==-1
         bool visualTouch=bar_index>z.phaseStartBar and f_poiVisualStop(visualBull?1:-1,z.top,z.bottom,high,low,poiBoxStopRule)
         if na(z.visualStopTime) and (visualTouch or not active)
