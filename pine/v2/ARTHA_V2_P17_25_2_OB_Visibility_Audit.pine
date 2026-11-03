@@ -2053,7 +2053,7 @@ if array.size(orderBlocks)>0
         bool visible=active and ((isOB and showOBZones) or (isBB and showBBZones))
         bool nearZone=not nativePOICleanView or f_poiNearPrice(z.top,z.bottom,cleanOBProximityATR)
         bool recentEnd=not na(z.visualStopBar) and (not nativePOICleanView or bar_index-z.visualStopBar<=cleanEndedLookback)
-        bool obShowSetting=(isOB and showOBZones) or (isBB and showBBZones)
+        bool obShowSetting=(isOB and showOBZones) or (isBB and showBBZones) or (z.state==2 and (showOBZones or showBBZones))
 
         if not na(z.bx)
             box.set_right(z.bx,na(z.visualStopTime)?time:z.visualStopTime)
