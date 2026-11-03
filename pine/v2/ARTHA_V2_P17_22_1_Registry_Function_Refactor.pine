@@ -1428,7 +1428,7 @@ f_processHTFRegistry(int previousTime,int previousNew,int previousRetired,int pr
     int newCount=previousNew
     int retiredCount=previousRetired
     int flipCount=previousFlips
-    if barstate.isconfirmed and newCountSourceBar
+    if barstate.isconfirmed and htfRegistryNewSourceBar
         // Preserve existing source-derived candidates. A newer candidate does not
         // silently evict a previous independent OB/BB record.
         if array.size(htfRegistryZones)>0
