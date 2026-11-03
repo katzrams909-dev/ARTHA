@@ -3385,6 +3385,7 @@ var int midpointLossCount=0
 var int midpointAmbiguousCount=0
 var int midpointTimeoutCount=0
 var int midpointRecordEvicted=0
+var int midpointEarlyMatched=0
 
 f_midpointKey(UnifiedPOI p) =>
     p.sourceEngine+":"+str.tostring(p.sourceId)+":"+p.poiType
@@ -3486,7 +3487,18 @@ midpointAmbiguousCount+=shadowAmbiguous
 midpointTimeoutCount+=shadowTimeouts
 midpointRecordEvicted+=shadowEvictions
 
-var table shadowAuditTable=table.new(position.bottom_left,2,9,border_width=1)
+// A received existing EARLY trade is matched to a prior midpoint touch
+// on the exact native source phase. Observation is downstream and read-only.
+if barstate.isconfirmed and shadowMidpointEnabled and reactionSignalEvent and reactionKind=="EARLY"
+    string earlyKey=reactionPOIEngine+":"+str.tostring(reactionPOIId)+":"+reactionPOIType
+    if array.size(midpointTrials)>0
+        for k=0 to array.size(midpointTrials)-1
+            ShadowMidpointTrial t=array.get(midpointTrials,k)
+            if t.key==earlyKey and t.direction==reactionDir and bar_index>=t.touchBar and bar_index-t.touchBar<=shadowReclaimWindow
+                midpointEarlyMatched+=1
+                break
+
+var table shadowAuditTable=table.new(position.bottom_left,2,10,border_width=1)
 if barstate.islast and showShadowAuditTable
     table.cell(shadowAuditTable,0,0,"MIDPOINT · SHADOW",text_color=color.white,bgcolor=color.rgb(35,45,60))
     table.cell(shadowAuditTable,1,0,"P17.26",text_color=color.white,bgcolor=color.rgb(35,45,60))
@@ -3508,6 +3520,8 @@ if barstate.islast and showShadowAuditTable
     string percentage=decided>0?str.tostring(100.0*midpointWinCount/decided,"#.0")+"%":"—"
     table.cell(shadowAuditTable,0,8,"Unambiguous 1R rate",text_color=color.silver)
     table.cell(shadowAuditTable,1,8,percentage,text_color=color.white)
+    table.cell(shadowAuditTable,0,9,"Existing EARLY matched",text_color=color.silver)
+    table.cell(shadowAuditTable,1,9,str.tostring(midpointEarlyMatched),text_color=color.white)
 
 //=============================================================================
 // RISK & TARGET ENGINE
