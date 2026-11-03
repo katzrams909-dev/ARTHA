@@ -1923,7 +1923,7 @@ if array.size(imbalanceZones)>0
 
         if not na(z.bx)
             box.set_right(z.bx,na(z.visualStopBar)?bar_index:z.visualStopBar)
-            bool showVisual=(visible and showCleanFVG) or (preserveEndedPOIBoxes and familyVisible and fvgShowSetting and recentEnd and showCleanFVG)
+            bool showVisual=((visible and (na(z.visualStopBar) or recentEnd)) or (preserveEndedPOIBoxes and familyVisible and fvgShowSetting and recentEnd)) and showCleanFVG
             box.set_bgcolor(z.bx,showVisual?color.new(c,fvgTransparency):color.new(c,100))
             box.set_border_color(z.bx,showVisual?color.new(c,20):color.new(c,100))
             string kind=isIFVG?"IFVG":"FVG"
@@ -2053,7 +2053,7 @@ if array.size(orderBlocks)>0
 
         if not na(z.bx)
             box.set_right(z.bx,na(z.visualStopTime)?time:z.visualStopTime)
-            bool showVisual=(visible and nearZone) or (preserveEndedPOIBoxes and obShowSetting and recentEnd and nearZone)
+            bool showVisual=((visible and (na(z.visualStopBar) or recentEnd)) or (preserveEndedPOIBoxes and obShowSetting and recentEnd)) and nearZone
             box.set_bgcolor(z.bx,showVisual?color.new(c,obTransparency):color.new(c,100))
             box.set_border_color(z.bx,showVisual?color.new(c,20):color.new(c,100))
             string kind=isBB?"BB":"OB"
