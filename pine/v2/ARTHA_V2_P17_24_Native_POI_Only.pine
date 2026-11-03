@@ -1084,8 +1084,8 @@ var string lastOutcomeText="NONE"
 
 // P16 attribution buckets.
 // First six: family × source. Last four: quality grade.
-var array<string> perfKeys=array.from("REV_NORMAL","REV_MISS","REV_EARLY","CONT_NORMAL","CONT_MISS","CONT_EARLY","GRADE_A","GRADE_B","GRADE_C","GRADE_D","REV_HTF_POI","CONT_HTF_POI")
-var array<string> perfLabels=array.from("REV · NORMAL","REV · MISS","REV · EARLY","CONT · NORMAL","CONT · MISS","CONT · EARLY","Grade A","Grade B","Grade C","Grade D","REV · HTF POI","CONT · HTF POI")
+var array<string> perfKeys=array.from("REV_NORMAL","REV_MISS","REV_EARLY","CONT_NORMAL","CONT_MISS","CONT_EARLY","GRADE_A","GRADE_B","GRADE_C","GRADE_D")
+var array<string> perfLabels=array.from("REV · NORMAL","REV · MISS","REV · EARLY","CONT · NORMAL","CONT · MISS","CONT · EARLY","Grade A","Grade B","Grade C","Grade D")
 var array<int> perfClosed=array.new_int(12,0)
 var array<int> perfWins=array.new_int(12,0)
 var array<int> perfLosses=array.new_int(12,0)
@@ -3430,7 +3430,7 @@ if anySignal
                 string setupPOIType=reactionSignalEvent?reactionPOIType:(family=="REV"?(dir==1?bullREVPOIType:bearREVPOIType):(dir==1?bullCONTPOIType:bearCONTPOIType))
                 string sourceText=signalSource=="NORMAL"?"":" · "+signalSource
                 string identityText=showFamilyDirectionInEntryTag?family+" "+(dir==1?"BUY":"SELL")+sourceText+" · Q"+str.tostring(setupScore)+" "+setupGrade+"\n":""
-                string reasonText=isHTFEvent?"Confirmed "+mtfPOITimeframe+" FVG · LTF reaction":(family=="REV"?"Reversal":"Continuation")+" · "+setupPOIType+"#"+str.tostring(poiId)+" · EP"+str.tostring(epId)+(mtfAligned?" · HTF FVG "+mtfPOITimeframe:"")
+                string reasonText=(family=="REV"?"Reversal":"Continuation")+" · "+setupPOIType+"#"+str.tostring(poiId)+" · EP"+str.tostring(epId)
                 string eText=family+" "+(dir==1?"BUY":"SELL")+(signalSource=="NORMAL"?"":" · "+signalSource)+" · Q"+str.tostring(setupScore)+" "+setupGrade+"\nENTRY "+str.tostring(entryPrice,format.mintick)+" · "+reasonText
                 string sText="SL  "+str.tostring(stopPrice,format.mintick)
                 string t1Text="T1  "+str.tostring(target1,format.mintick)+"  ·  "+str.tostring(rr1,"#.00")+"R"
@@ -3448,10 +3448,6 @@ if anySignal
                 array.remove(signalLabels,unifiedMarkerIndex)
             planSignalMarker:=na
 
-        if isHTFEvent
-            lastHTFTradedOrigin:=mtfFVGOrigin
-            newHTFPlanEvent:=true
-            array.push(signalHistory,SignalRecord.new(family,dir,epId,poiEngine,poiId,bar_index,setupScore,"HTF_POI",0))
         array.push(riskPlans,RiskPlan.new(nextRiskPlanId,family,signalSource,dir,epId,poiEngine,poiId,bar_index,time,setupScore,setupGrade,entryPrice,stopPrice,target1,target2,visualTP3,visualTP4,rr1,rr2,rr3,rr4,t1Source,t2Source,0,1.0,0,na,false,outcomeModel=="Four-stage liquidity ladder"?0.0:na,"ACTIVE",planSignalMarker,eLine,sLine,t1Line,t2Line,t3Line,t4Line,t3Tag,t4Tag,rBox,rwBox,eTag,sTag,t1Tag,t2Tag,stTag))
         f_addRecentEntryCard(nextRiskPlanId,family,signalSource,dir,epId,poiEngine,poiId,time,entryPrice)
         nextRiskPlanId+=1
