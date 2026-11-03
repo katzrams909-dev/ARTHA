@@ -1282,10 +1282,11 @@ bool mtfBearZone=mtfPOIEnabled and mtfFVGDir==-1 and not na(mtfFVGTop) and not n
 // the *calculations* only become available after that source candle closes.
 // Historical placement is a provenance visual, NOT permission for earlier entries.
 // Display switches do not change signal admission, HTF context, or targets.
-f_renderHTFBox(box activeBox,int priorOrigin,array<box> history,int direction,float zoneTop,float zoneBottom,int origin,bool visible,string sourceTag) =>
+f_renderHTFBox(box activeBox,int priorOrigin,array<box> history,array<int> stoppedOrigins,int direction,float zoneTop,float zoneBottom,int origin,bool visible,string sourceTag) =>
     box result=activeBox
     int activeOrigin=priorOrigin
-    bool usable=visible and direction!=0 and not na(origin) and not na(zoneTop) and not na(zoneBottom)
+    bool previouslyStopped=array.includes(stoppedOrigins,origin)
+    bool usable=visible and direction!=0 and not na(origin) and not na(zoneTop) and not na(zoneBottom) and not previouslyStopped
     if usable
         bool newZone=na(result) or activeOrigin!=origin or box.get_top(result)!=zoneTop or box.get_bottom(result)!=zoneBottom
         if newZone
@@ -1297,7 +1298,16 @@ f_renderHTFBox(box activeBox,int priorOrigin,array<box> history,int direction,fl
                 box old=array.shift(history)
                 box.delete(old)
         else
-            box.set_right(result,time)
+            bool stopNow=poiBoxStopRule!="Retirement only" and time>box.get_right(result) and f_poiVisualStop(direction,zoneTop,zoneBottom,high,low,poiBoxStopRule)
+            if stopNow
+                box.set_right(result,time)
+                box.set_text(result,sourceTag+" FVG · END")
+                array.push(stoppedOrigins,origin)
+                while array.size(stoppedOrigins)>maxHTFZoneBoxes*4
+                    array.shift(stoppedOrigins)
+                result:=na
+            else
+                box.set_right(result,time)
     else
         result:=na
         activeOrigin:=na
@@ -1306,6 +1316,9 @@ f_renderHTFBox(box activeBox,int priorOrigin,array<box> history,int direction,fl
 bool valid15=timeframe.in_seconds(timeframe.period)<timeframe.in_seconds("15")
 bool valid60=timeframe.in_seconds(timeframe.period)<timeframe.in_seconds("60")
 bool customTF=mtfPOITimeframe!="15" and mtfPOITimeframe!="60"
+var array<int> mtf15Stopped=array.new_int()
+var array<int> mtf60Stopped=array.new_int()
+var array<int> mtfCustomStopped=array.new_int()
 var array<box> mtf15History=array.new_box()
 var array<box> mtf60History=array.new_box()
 var array<box> mtfCustomHistory=array.new_box()
@@ -1316,13 +1329,13 @@ var int mtf15ActiveOrigin=na
 var int mtf60ActiveOrigin=na
 var int mtfCustomActiveOrigin=na
 if barstate.isconfirmed
-    [next15Box,next15Origin]=f_renderHTFBox(mtf15Active,mtf15ActiveOrigin,mtf15History,mtf15Dir,mtf15Top,mtf15Bottom,mtf15Origin,enableMTFContext and showHTF15mZones and valid15,"15m")
+    [next15Box,next15Origin]=f_renderHTFBox(mtf15Active,mtf15ActiveOrigin,mtf15History,mtf15Stopped,mtf15Dir,mtf15Top,mtf15Bottom,mtf15Origin,enableMTFContext and showHTF15mZones and valid15,"15m")
     mtf15Active:=next15Box
     mtf15ActiveOrigin:=next15Origin
-    [next60Box,next60Origin]=f_renderHTFBox(mtf60Active,mtf60ActiveOrigin,mtf60History,mtf60Dir,mtf60Top,mtf60Bottom,mtf60Origin,enableMTFContext and showHTF1hZones and valid60,"1H")
+    [next60Box,next60Origin]=f_renderHTFBox(mtf60Active,mtf60ActiveOrigin,mtf60History,mtf60Stopped,mtf60Dir,mtf60Top,mtf60Bottom,mtf60Origin,enableMTFContext and showHTF1hZones and valid60,"1H")
     mtf60Active:=next60Box
     mtf60ActiveOrigin:=next60Origin
-    [nextCustomBox,nextCustomOrigin]=f_renderHTFBox(mtfCustomActive,mtfCustomActiveOrigin,mtfCustomHistory,mtfFVGDir,mtfFVGTop,mtfFVGBottom,mtfFVGOrigin,enableMTFContext and showHTFSelectedZones and mtfPOIValidTF and customTF,mtfPOITimeframe)
+    [nextCustomBox,nextCustomOrigin]=f_renderHTFBox(mtfCustomActive,mtfCustomActiveOrigin,mtfCustomHistory,mtfCustomStopped,mtfFVGDir,mtfFVGTop,mtfFVGBottom,mtfFVGOrigin,enableMTFContext and showHTFSelectedZones and mtfPOIValidTF and customTF,mtfPOITimeframe)
     mtfCustomActive:=nextCustomBox
     mtfCustomActiveOrigin:=nextCustomOrigin
 
@@ -1449,6 +1462,9 @@ f_processHTFRegistry(int previousTime,int previousNew,int previousRetired,int pr
                     float h=math.max(z.top-z.bottom,syminfo.mintick)
                     float overlap=math.max(0.0,math.min(htfClosedHigh,z.top)-math.max(htfClosedLow,z.bottom))
                     z.mitigationPct:=math.max(z.mitigationPct,100.0*overlap/h)
+                    bool visualStop=f_poiVisualStop(z.state==1?-z.originalDirection:z.originalDirection,z.top,z.bottom,htfClosedHigh,htfClosedLow,poiBoxStopRule)
+                    if na(z.visualStopTime) and htfClosedTime>z.birthTime and visualStop
+                        z.visualStopTime:=htfClosedTime
                     bool breach=z.originalDirection==1?(bbFlipMode=="Full body beyond boundary"?(htfClosedOpen<z.bottom and htfClosedClose<z.bottom):htfClosedClose<z.bottom):(bbFlipMode=="Full body beyond boundary"?(htfClosedOpen>z.top and htfClosedClose>z.top):htfClosedClose>z.top)
                     bool wickFilled=z.originalDirection==1?htfClosedLow<=z.bottom:htfClosedHigh>=z.top
                     if z.state==0
@@ -1469,6 +1485,8 @@ f_processHTFRegistry(int previousTime,int previousNew,int previousRetired,int pr
                         if invalid or (retireBBOnFullWickFill and fullTraverse)
                             z.state:=2
                             retiredCount+=1
+                    if z.state==2 and na(z.visualStopTime)
+                        z.visualStopTime:=htfClosedTime
                     z.lastSourceTime:=htfClosedTime
                     array.set(htfRegistryZones,n,z)
 
@@ -1503,15 +1521,16 @@ f_drawHTFRegistry() =>
             HTFRegistryZone z=array.get(htfRegistryZones,n)
             bool bullish=z.state==1?z.originalDirection==-1:z.originalDirection==1
             color c=z.state==1?(bullish?bullBBColor:bearBBColor):(bullish?bullOBColor:bearOBColor)
-            bool render=showHTFOBBridge and htfRegistryValid and z.state<2
+            bool render=showHTFOBBridge and htfRegistryValid and (z.state<2 or (preserveEndedPOIBoxes and not na(z.visualStopTime)))
             if render
+                int endTime=na(z.visualStopTime)?time:z.visualStopTime
                 if na(z.bx)
-                    z.bx:=box.new(left=z.originTime,top=z.top,right=time,bottom=z.bottom,xloc=xloc.bar_time,extend=extend.none,bgcolor=color.new(c,obTransparency),border_color=color.new(c,25),text=mtfPOITimeframe+(z.state==1?" BB candidate":" OB candidate"),text_color=c,text_size=size.tiny,text_halign=text.align_right)
+                    z.bx:=box.new(left=z.originTime,top=z.top,right=endTime,bottom=z.bottom,xloc=xloc.bar_time,extend=extend.none,bgcolor=color.new(c,obTransparency),border_color=color.new(c,25),text=mtfPOITimeframe+(z.state==1?" BB candidate":" OB candidate"),text_color=c,text_size=size.tiny,text_halign=text.align_right)
                 else
-                    box.set_right(z.bx,time)
+                    box.set_right(z.bx,endTime)
                     box.set_bgcolor(z.bx,color.new(c,obTransparency))
                     box.set_border_color(z.bx,color.new(c,25))
-                    box.set_text(z.bx,mtfPOITimeframe+(z.state==1?" BB candidate":" OB candidate"))
+                    box.set_text(z.bx,mtfPOITimeframe+(z.state==1?" BB candidate":" OB candidate")+(not na(z.visualStopTime)?" · END":""))
             else if not na(z.bx)
                 // Preserve terminal geometry; hide only if the user disables it.
                 if not showHTFOBBridge
