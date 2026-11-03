@@ -3389,6 +3389,24 @@ var int midpointRecordEvicted=0
 f_midpointKey(UnifiedPOI p) =>
     p.sourceEngine+":"+str.tostring(p.sourceId)+":"+p.poiType
 
+// Native source phase timestamp (not shared original source birth).
+// No simulated order may fill on the candle that confirmed an IFVG/BB flip.
+f_midpointPhaseBar(UnifiedPOI p) =>
+    int phase=p.bornBar
+    if p.sourceEngine=="IMBALANCE" and array.size(imbalanceZones)>0
+        for k=0 to array.size(imbalanceZones)-1
+            ImbalanceZone z=array.get(imbalanceZones,k)
+            if z.id==p.sourceId
+                phase:=z.phaseStartBar
+                break
+    else if p.sourceEngine=="ORDERBLOCK" and array.size(orderBlocks)>0
+        for k=0 to array.size(orderBlocks)-1
+            OrderBlockZone z=array.get(orderBlocks,k)
+            if z.id==p.sourceId
+                phase:=z.phaseStartBar
+                break
+    phase
+
 f_midpointAlreadyTracked(string key) =>
     bool seen=false
     if array.size(midpointTrials)>0
@@ -3416,7 +3434,7 @@ f_scanMidpointAudit() =>
                 ShadowMidpointTrial t=array.get(midpointTrials,k)
                 int age=bar_index-t.touchBar
                 if age>0
-                    if not t.reclaimSeen and age<=shadowReclaimWindow
+                    if not t.reclaimSeen and t.outcome==0 and age<=shadowReclaimWindow
                         bool directionalClose=t.direction==1?(close>open and close>=t.entry):(close<open and close<=t.entry)
                         if directionalClose
                             t.reclaimSeen:=true
@@ -3446,7 +3464,7 @@ f_scanMidpointAudit() =>
                 bool crossed=p.direction==1?low<=midpoint:high>=midpoint
                 // POI must exist at the prior confirmed bar. A newly confirmed
                 // source zone is NOT retroactively assumed to have a limit order.
-                if qualified and bar_index>p.bornBar and crossed and not f_midpointAlreadyTracked(key)
+                if qualified and bar_index>f_midpointPhaseBar(p) and crossed and not f_midpointAlreadyTracked(key)
                     float buffer=math.max(nz(atr,syminfo.mintick)*shadowStopBufferATR,syminfo.mintick)
                     float stop=p.direction==1?p.bottom-buffer:p.top+buffer
                     float risk=math.abs(midpoint-stop)
