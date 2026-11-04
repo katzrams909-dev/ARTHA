@@ -3467,7 +3467,7 @@ f_drawOTEAutoFib() =>
                         label tag=label.new(right,level,name,xloc=xloc.bar_index,style=label.style_label_left,textcolor=ink,color=color.new(color.black,85),size=size.tiny)
                         array.push(oteFibLabels,tag)
 
-// Keep global execution compact; both helpers only mutate shadow arrays and table.
+// Keep OTE range updates and Auto Fib drawing isolated from the main body.
 f_updateOTEShadow()
 if barstate.islast
     f_drawOTEAutoFib()
