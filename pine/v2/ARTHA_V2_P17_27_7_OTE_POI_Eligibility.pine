@@ -3449,7 +3449,7 @@ f_updateOTEShadow() =>
                 float top=math.max(a,b)
                 float bottom=math.min(a,b)
                 float mid=extreme-newDir*span*0.705
-                bool overlap=f_oteOverlapsPOI(newDir,top,bottom)
+                bool overlap=f_otePOIIndex(newDir,top,bottom)>=0
                 OTEShadowRange created=OTEShadowRange.new(newDir,bar_index,bar_index,origin,extreme,top,bottom,mid,overlap,false,false,false,"")
                 array.push(oteRanges,created)
                 array.push(oteFibBreakArchive,created.copy())
@@ -3597,7 +3597,13 @@ f_drawOTEAutoFib() =>
             f_drawFibBatch(oteFibSwingArchive,minorLimit,false,true)
             f_drawFibBatch(oteFibMajorArchive,majorLimit,true,false)
 
-var table oteFibStatusTable=table.new(position.top_center,2,2,border_width=1)
+var table oteFibStatusTable=table.new(position.top_center,2,4,border_width=1)
+f_oteCandidateStatus(array<OTEShadowRange> book) =>
+    string status="NO RANGE"
+    if array.size(book)>0
+        OTEShadowRange t=array.get(book,array.size(book)-1)
+        status=t.touched?(t.qualifiedTouch?"TOUCH + "+t.matchedPOIType:"TOUCH / NO POI"):(t.poiOverlap?"POI READY":"NO POI")
+    status
 f_renderFibStatus() =>
     if oteAutoFibShow and oteAutoFibStatus
         bool swings=oteAutoFibSource=="Confirmed Swings"
@@ -3610,6 +3616,13 @@ f_renderFibStatus() =>
         table.cell(oteFibStatusTable,1,0,detail,text_color=color.white,bgcolor=color.new(color.black,60))
         table.cell(oteFibStatusTable,0,1,available>0?"Display":"Waiting",text_color=color.silver,bgcolor=color.new(color.black,70))
         table.cell(oteFibStatusTable,1,1,available>0?"READY":swings?"CONFIRMED PIVOTS":"STRUCTURAL BREAK",text_color=available>0?color.lime:color.orange,bgcolor=color.new(color.black,70))
+        if otePOIConfluenceStatus
+            string poiA=not swings?f_oteCandidateStatus(oteFibBreakArchive):oteFibScale=="Major"?f_oteCandidateStatus(oteFibMajorArchive):f_oteCandidateStatus(oteFibSwingArchive)
+            table.cell(oteFibStatusTable,0,2,swings and oteFibScale=="Both"?"MINOR POI":"OTE POI",text_color=color.silver,bgcolor=color.new(color.black,70))
+            table.cell(oteFibStatusTable,1,2,poiA,text_color=color.white,bgcolor=color.new(color.black,70))
+            if swings and oteFibScale=="Both"
+                table.cell(oteFibStatusTable,0,3,"MAJOR POI",text_color=color.silver,bgcolor=color.new(color.black,70))
+                table.cell(oteFibStatusTable,1,3,f_oteCandidateStatus(oteFibMajorArchive),text_color=color.white,bgcolor=color.new(color.black,70))
 
 // Keep OTE range updates and Auto Fib drawing isolated from the main body.
 f_updateOTEShadow()
