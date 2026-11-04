@@ -3587,23 +3587,35 @@ f_armMidpointAudit() =>
                 else if array.size(midpointTrials)>=shadowMaxRecords
                     array.set(shadowStats,0,array.get(shadowStats,0)+1)
                 else
-                    float buffer=math.max(nz(atr,syminfo.mintick)*shadowStopBufferATR,syminfo.mintick)
-                    float stop=p.direction==1?p.bottom-buffer:p.top+buffer
+                    float stop=p.frozenStop
+                    float target=p.frozenTarget
                     float risk=math.abs(midpoint-stop)
                     if risk>0
-                        float target=midpoint+p.direction*risk
                         map.put(midpointSeenAt,p.key,bar_index)
                         int bucket=f_shadowBucket(p.poiType,p.direction)
                         array.set(shadowTouchesBySide,bucket,array.get(shadowTouchesBySide,bucket)+1)
+                        int seq=f_shadowLTFOutcome(p.direction,midpoint,stop,target,true)
                         bool stopSame=p.direction==1?low<=stop:high>=stop
                         bool targetSame=p.direction==1?high>=target:low<=target
-                        bool uncertain=stopSame or targetSame
-                        if uncertain
+                        int result=seq==10?(stopSame or targetSame?3:0):seq
+                        if seq==10
+                            array.set(shadowStats,7,array.get(shadowStats,7)+1)
+                        else
+                            array.set(shadowStats,9,array.get(shadowStats,9)+1)
+                        if result==3
                             array.set(shadowStats,3,array.get(shadowStats,3)+1)
                             array.set(shadowAmbBySide,bucket,array.get(shadowAmbBySide,bucket)+1)
+                            if seq==3
+                                array.set(shadowStats,8,array.get(shadowStats,8)+1)
+                        else if result==1
+                            array.set(shadowStats,6,array.get(shadowStats,6)+1)
+                            array.set(shadowWinsBySide,bucket,array.get(shadowWinsBySide,bucket)+1)
+                        else if result==-1
+                            array.set(shadowStats,6,array.get(shadowStats,6)+1)
+                            array.set(shadowLossBySide,bucket,array.get(shadowLossBySide,bucket)+1)
                         if not f_snapshotStillActive(p.key)
                             array.set(shadowStats,5,array.get(shadowStats,5)+1)
-                        array.push(midpointTrials,ShadowMidpointTrial.new(p.key,p.direction,p.poiType,midpoint,stop,target,bar_index,uncertain?3:0,false))
+                        array.push(midpointTrials,ShadowMidpointTrial.new(p.key,p.direction,p.poiType,midpoint,stop,target,bar_index,result,false))
 
 // Record NEXT bar's eligible POIs only after this bar's shadow touch has
 // been measured. Snapshots are drawings-free immutable scalar records.
