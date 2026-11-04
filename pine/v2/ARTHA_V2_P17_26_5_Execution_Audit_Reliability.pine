@@ -3616,14 +3616,14 @@ f_snapshotChangeClass(string wantedKey) =>
                 ImbalanceZone z=array.get(imbalanceZones,k)
                 string stem="IMBALANCE:"+str.tostring(z.id)+":"
                 if str.startswith(wantedKey,stem)
-                    classification:=z.state==2?2:z.state==1?1:3
+                    classification:=z.state==2?2:(z.state==1 and str.endswith(wantedKey,":FVG"))?1:3
                     break
         if array.size(orderBlocks)>0
             for k=0 to array.size(orderBlocks)-1
                 OrderBlockZone z=array.get(orderBlocks,k)
                 string stem="ORDERBLOCK:"+str.tostring(z.id)+":"
                 if str.startswith(wantedKey,stem)
-                    classification:=z.state==2?2:z.state==1?1:3
+                    classification:=z.state==2?2:(z.state==1 and str.endswith(wantedKey,":OB"))?1:3
                     break
     classification
 
