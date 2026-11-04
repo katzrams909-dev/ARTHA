@@ -3505,7 +3505,7 @@ f_updateExecutionAudit() =>
                     bool stopHit=t.direction==1?low<=t.stop:high>=t.stop
                     bool targetHit=t.direction==1?high>=t.target:low<=t.target
                     int sequence=f_shadowLTFOutcome(t.direction,t.entry,t.stop,t.target,false)
-                    if sequence==3 or (sequence==10 and stopHit and targetHit)
+                    if sequence==3 or (sequence==10 and stopHit and targetHit) or (sequence==0 and (stopHit or targetHit))
                         t.outcome:=3
                         array.set(shadowAmbBySide,bucket,array.get(shadowAmbBySide,bucket)+1)
                     else if sequence==-1 or (sequence==10 and stopHit)
@@ -3545,7 +3545,7 @@ f_updateExecutionAudit() =>
                     int sequence=f_shadowLTFOutcome(t.direction,t.entry,t.stop,t.target,false)
                     int b=f_shadowBucket(t.poiType,t.direction)
                     bool terminal=false
-                    if sequence==3 or (sequence==10 and stopHit and targetHit)
+                    if sequence==3 or (sequence==10 and stopHit and targetHit) or (sequence==0 and (stopHit or targetHit))
                         array.set(shadowRAmbBySide,b,array.get(shadowRAmbBySide,b)+1)
                         terminal:=true
                     else if sequence==-1 or (sequence==10 and stopHit)
