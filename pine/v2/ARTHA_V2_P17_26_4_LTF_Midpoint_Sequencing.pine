@@ -3715,6 +3715,14 @@ f_renderExecutionAudit() =>
         table.cell(shadowAuditTable,1,14,str.tostring(array.get(shadowStats,5)),text_color=color.orange)
         table.cell(shadowAuditTable,3,14,"Prior POIs",text_color=color.silver)
         table.cell(shadowAuditTable,4,14,str.tostring(array.size(shadowPriorPOIs)),text_color=color.white)
+        table.cell(shadowAuditTable,0,15,"LTF 1st resolved",text_color=color.silver)
+        table.cell(shadowAuditTable,1,15,str.tostring(array.get(shadowStats,6)),text_color=color.lime)
+        table.cell(shadowAuditTable,3,15,"LTF unavailable",text_color=color.silver)
+        table.cell(shadowAuditTable,4,15,str.tostring(array.get(shadowStats,7)),text_color=color.orange)
+        table.cell(shadowAuditTable,0,16,"LTF uncertain",text_color=color.silver)
+        table.cell(shadowAuditTable,1,16,str.tostring(array.get(shadowStats,8)),text_color=color.orange)
+        table.cell(shadowAuditTable,3,16,"LTF inspected",text_color=color.silver)
+        table.cell(shadowAuditTable,4,16,str.tostring(array.get(shadowStats,9)),text_color=color.white)
 
 // Calls are read-only with respect to the core strategy. Audit counters and
 // shadow arrays/maps are independent of the live trade/risk-plan state.
