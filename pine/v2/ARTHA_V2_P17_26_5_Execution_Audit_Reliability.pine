@@ -3543,6 +3543,10 @@ f_updateExecutionAudit() =>
                     else if age>=shadowOutcomeHorizon
                         t.outcome:=2
                         array.set(shadowTimeoutBySide,bucket,array.get(shadowTimeoutBySide,bucket)+1)
+                    if t.outcome!=0 and not map.contains(shadowMidTerminal,t.key)
+                        map.put(shadowMidTerminal,t.key,t.outcome)
+                        f_shadowEvidenceAdd(t.outcome,sequence!=10)
+                        f_shadowPairRegister(t.key)
                     if t.outcome==0 and not t.reclaimSeen and age<=shadowReclaimWindow
                         bool reclaimed=t.direction==1?(close>open and close>=t.entry):(close<open and close<=t.entry)
                         if reclaimed
@@ -3584,6 +3588,9 @@ f_updateExecutionAudit() =>
                         array.set(shadowRTimeoutBySide,b,array.get(shadowRTimeoutBySide,b)+1)
                         terminal:=true
                     if terminal
+                        int completedOutcome=sequence==3 or (sequence==10 and stopHit and targetHit) or (sequence==0 and (stopHit or targetHit))?3:(sequence==-1 or (sequence==10 and stopHit))?-1:(sequence==1 or (sequence==10 and targetHit))?1:2
+                        map.put(shadowReclaimTerminal,t.key,completedOutcome)
+                        f_shadowPairRegister(t.key)
                         array.remove(reclaimTrials,j)
 
 // Check whether a previously confirmed phase survived the current candle.
@@ -3639,6 +3646,10 @@ f_armMidpointAudit() =>
                         else if result==-1
                             array.set(shadowStats,6,array.get(shadowStats,6)+1)
                             array.set(shadowLossBySide,bucket,array.get(shadowLossBySide,bucket)+1)
+                        if result!=0
+                            map.put(shadowMidTerminal,p.key,result)
+                            f_shadowEvidenceAdd(result,seq!=10)
+                            f_shadowPairRegister(p.key)
                         if not f_snapshotStillActive(p.key)
                             array.set(shadowStats,5,array.get(shadowStats,5)+1)
                         array.push(midpointTrials,ShadowMidpointTrial.new(p.key,p.direction,p.poiType,midpoint,stop,target,bar_index,result,false))
