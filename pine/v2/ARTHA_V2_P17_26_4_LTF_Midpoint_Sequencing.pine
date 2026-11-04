@@ -344,6 +344,8 @@ int shadowOutcomeHorizon=input.int(25,"1R evaluation horizon (bars)",minval=2,ma
 float shadowStopBufferATR=input.float(0.10,"Hypothetical stop beyond POI (ATR)",minval=0.0,maxval=2.0,step=0.05,group=G142)
 int shadowMaxRecords=input.int(300,"Maximum concurrent unresolved shadow trials",minval=25,maxval=800,group=G142)
 int shadowSeenKeyLimit=input.int(20000,"Maximum distinct phase keys (fail closed)",minval=500,maxval=80000,group=G142)
+bool shadowUseLTF=input.bool(true,"Use lower timeframe sequencing for shadow audit",group=G142)
+string shadowLTF=input.timeframe("1","Inspection timeframe",group=G142)
 bool showShadowAuditTable=input.bool(false,"Display midpoint shadow audit table",group=G142)
 
 string G15="15 Performance Attribution"
@@ -3395,6 +3397,8 @@ type ShadowPOISnapshot
     float top
     float bottom
     int phaseBar
+    float frozenStop
+    float frozenTarget
 
 var array<ShadowPOISnapshot> shadowPriorPOIs=array.new<ShadowPOISnapshot>()
 
@@ -3416,7 +3420,7 @@ var array<int> shadowRAmbBySide=array.from(0,0,0,0,0,0,0,0)
 var array<int> shadowRTimeoutBySide=array.from(0,0,0,0,0,0,0,0)
 // Stats indices: 0 midpoint capacity, 1 key limit, 2 reclaim capacity,
 // 3 touch-bar uncertain, 4 existing EARLY matched, 5 retired/inverted on touch.
-var array<int> shadowStats=array.from(0,0,0,0,0,0)
+var array<int> shadowStats=array.from(0,0,0,0,0,0,0,0,0,0)
 
 f_shadowTypeIndex(string kind) =>
     kind=="OB"?0:kind=="BB"?1:kind=="FVG"?2:3
@@ -3567,7 +3571,11 @@ f_captureNextMidpointSnapshot() =>
                 UnifiedPOI p=array.get(unifiedPOIs,k)
                 bool eligible=not shadowOnlyPrimary or (p.primary and not na(p.episodeId))
                 if eligible
-                    array.push(shadowPriorPOIs,ShadowPOISnapshot.new(f_shadowKey(p),p.poiType,p.direction,p.top,p.bottom,f_shadowPhaseBar(p)))
+                    float eq=(p.top+p.bottom)*0.5
+                    float buffer=math.max(nz(atr,syminfo.mintick)*shadowStopBufferATR,syminfo.mintick)
+                    float frozenStop=p.direction==1?p.bottom-buffer:p.top+buffer
+                    float frozenTarget=eq+p.direction*math.abs(eq-frozenStop)
+                    array.push(shadowPriorPOIs,ShadowPOISnapshot.new(f_shadowKey(p),p.poiType,p.direction,p.top,p.bottom,f_shadowPhaseBar(p),frozenStop,frozenTarget))
 
 f_matchExistingEarlyAudit() =>
     if shadowMidpointEnabled and barstate.isconfirmed and reactionSignalEvent and reactionKind=="EARLY"
@@ -3577,7 +3585,7 @@ f_matchExistingEarlyAudit() =>
             if bar_index>=firstTouch and bar_index-firstTouch<=shadowReclaimWindow
                 array.set(shadowStats,4,array.get(shadowStats,4)+1)
 
-var table shadowAuditTable=table.new(position.bottom_left,7,15,border_width=1)
+var table shadowAuditTable=table.new(position.bottom_left,7,17,border_width=1)
 f_renderExecutionAudit() =>
     if showShadowAuditTable
         color hd=color.rgb(35,45,60)
