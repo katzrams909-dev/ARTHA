@@ -3431,6 +3431,48 @@ f_shadowBucket(string kind,int dir) =>
 f_shadowKey(UnifiedPOI p) =>
     p.sourceEngine+":"+str.tostring(p.sourceId)+":"+p.poiType
 
+// Ordered intrabar arrays, requested once on every chart candle.
+// A matching/higher requested timeframe disables this shadow-only inspection.
+bool shadowLTFValid=shadowUseLTF and timeframe.in_seconds(shadowLTF)<timeframe.in_seconds()
+[shadowIntraO,shadowIntraH,shadowIntraL,shadowIntraC]=request.security_lower_tf(syminfo.tickerid,shadowLTF,[open,high,low,close],ignore_invalid_timeframe=true)
+
+// 10 unavailable; 0 open; 1 target first; -1 stop first; 3 uncertain.
+// Entry bar: a gap past the resting limit is uncertain. A stop/target hit
+// within the same LTF candle as first fill is also uncertain. Later LTF
+// candles can be ordered chronologically, but never within their own OHLC.
+f_shadowLTFOutcome(int dir,float entry,float stop,float target,bool touchBar) =>
+    int count=shadowLTFValid?array.size(shadowIntraO):0
+    int outcome=10
+    if count>0
+        outcome:=0
+        bool filled=not touchBar
+        for q=0 to count-1
+            float o=array.get(shadowIntraO,q)
+            float h=array.get(shadowIntraH,q)
+            float l=array.get(shadowIntraL,q)
+            if not filled
+                bool gap=dir==1?o<entry:o>entry
+                bool crossed=l<=entry and h>=entry
+                if gap
+                    outcome:=3
+                    break
+                if crossed
+                    filled:=true
+                    bool stopInside=dir==1?l<=stop:h>=stop
+                    bool targetInside=dir==1?h>=target:l<=target
+                    if stopInside or targetInside
+                        outcome:=3
+                        break
+            else
+                bool stopped=dir==1?l<=stop:h>=stop
+                bool targeted=dir==1?h>=target:l<=target
+                if stopped or targeted
+                    outcome=stopped and targeted?3:stopped?-1:1
+                    break
+        if touchBar and not filled and outcome==0
+            outcome:=3
+    outcome
+
 // The current phase must be confirmed on a PRIOR bar before an order can
 // theoretically have been resting at its own 50% level.
 f_shadowPhaseBar(UnifiedPOI p) =>
