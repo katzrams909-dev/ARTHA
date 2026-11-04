@@ -3390,7 +3390,6 @@ var array<OTEShadowRange> oteRanges=array.new<OTEShadowRange>()
 // Only confirmed, directionally ordered pivots/break ranges are archived.
 var array<OTEShadowRange> oteFibSwingArchive=array.new<OTEShadowRange>()
 var array<OTEShadowRange> oteFibBreakArchive=array.new<OTEShadowRange>()
-var int oteFibLastPivotSignature=na
 
 f_oteOverlapsPOI(int dir,float top,float bottom) =>
     bool found=false
@@ -3444,8 +3443,7 @@ f_archiveConfirmedSwingFib() =>
     if barstate.isconfirmed and (newXPH or newXPL)
         bool up=not na(xHighBar) and not na(xLowBar) and xHighBar>xLowBar and xHigh>xLow
         bool down=not na(xHighBar) and not na(xLowBar) and xLowBar>xHighBar and xHigh>xLow
-        int signature=up?xHighBar:down?xLowBar:na
-        if (up or down) and not na(signature) and (na(oteFibLastPivotSignature) or signature!=oteFibLastPivotSignature)
+        if up or down
             int dir=up?1:-1
             float origin=up?xLow:xHigh
             float extreme=up?xHigh:xLow
@@ -3458,7 +3456,6 @@ f_archiveConfirmedSwingFib() =>
                 array.push(oteFibSwingArchive,OTEShadowRange.new(dir,anchorBar,origin,extreme,math.max(v62,v79),math.min(v62,v79),v705,false,false,false))
                 if array.size(oteFibSwingArchive)>15
                     array.shift(oteFibSwingArchive)
-                oteFibLastPivotSignature:=signature
 
 // Auto Fib display is a read-only projection of confirmed OTE observations.
 // A bounded drawing pool is refreshed only on the chart's last bar.
