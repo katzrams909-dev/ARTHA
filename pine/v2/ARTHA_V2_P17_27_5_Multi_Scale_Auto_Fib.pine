@@ -3502,41 +3502,58 @@ f_clearOTEAutoFib() =>
     while array.size(oteFibBoxes)>0
         box.delete(array.pop(oteFibBoxes))
 
-f_drawOTEAutoFib() =>
-    f_clearOTEAutoFib()
-    array<OTEShadowRange> fibSource=oteAutoFibSource=="Confirmed Swings"?oteFibSwingArchive:oteFibBreakArchive
-    if oteAutoFibShow and array.size(fibSource)>0
-        int total=array.size(fibSource)
-        int count=oteAutoFibMode=="Latest"?1:math.min(oteAutoFibHistory,total)
-        // Ascending index draws older first and latest last.
-        for n=total-count to total-1
-            OTEShadowRange r=array.get(fibSource,n)
+f_drawFibBatch(array<OTEShadowRange> source,int limit,bool major,bool dimMinor) =>
+    int total=array.size(source)
+    if total>0 and limit>0
+        for n=math.max(0,total-limit) to total-1
+            OTEShadowRange r=array.get(source,n)
             color ink=r.dir==1?oteAutoFibBull:oteAutoFibBear
+            int fade=dimMinor?55:0
             float span=math.abs(r.extreme-r.origin)
             int right=bar_index+oteAutoFibRight
             if span>syminfo.mintick and r.born<=bar_index
                 if oteAutoFibZone
-                    box zone=box.new(r.born,r.bandTop,right,r.bandBottom,xloc=xloc.bar_index,bgcolor=color.new(ink,88),border_color=color.new(ink,62),extend=extend.none)
+                    box zone=box.new(r.born,r.bandTop,right,r.bandBottom,xloc=xloc.bar_index,bgcolor=color.new(ink,dimMinor?94:88),border_color=color.new(ink,dimMinor?85:62),extend=extend.none)
                     array.push(oteFibBoxes,zone)
                 for k=0 to 5
                     float fib=k==0?0.0:k==1?0.5:k==2?0.62:k==3?0.705:k==4?0.79:1.0
                     float level=r.extreme-r.dir*span*fib
                     bool keyLevel=k==3
-                    line l=line.new(r.born,level,right,level,xloc=xloc.bar_index,extend=extend.none,color=color.new(ink,keyLevel?0:35),width=keyLevel?2:1,style=keyLevel?line.style_solid:line.style_dotted)
+                    line l=line.new(r.born,level,right,level,xloc=xloc.bar_index,extend=extend.none,color=color.new(ink,keyLevel?fade:math.max(fade,35)),width=keyLevel and major?2:1,style=keyLevel?line.style_solid:line.style_dotted)
                     array.push(oteFibLines,l)
                     if oteAutoFibLabels
                         string name=k==0?"0%":k==1?"50%":k==2?"62%":k==3?"70.5%":k==4?"79%":"100%"
-                        label tag=label.new(right,level,name,xloc=xloc.bar_index,style=label.style_label_left,textcolor=ink,color=color.new(color.black,85),size=size.tiny)
+                        string prefix=oteAutoFibSource=="Confirmed Swings" and oteFibScale=="Both"?(major?"MAJ ":"MIN "):""
+                        label tag=label.new(right,level,prefix+name,xloc=xloc.bar_index,style=label.style_label_left,textcolor=color.new(ink,fade),color=color.new(color.black,85),size=size.tiny)
                         array.push(oteFibLabels,tag)
+
+f_drawOTEAutoFib() =>
+    f_clearOTEAutoFib()
+    if oteAutoFibShow
+        int limit=oteAutoFibMode=="Latest"?1:oteAutoFibHistory
+        if oteAutoFibSource=="Structural Breaks"
+            f_drawFibBatch(oteFibBreakArchive,limit,true,false)
+        else if oteFibScale=="Major"
+            f_drawFibBatch(oteFibMajorArchive,limit,true,false)
+        else if oteFibScale=="Minor"
+            f_drawFibBatch(oteFibSwingArchive,limit,false,false)
+        else
+            int majorLimit=oteAutoFibMode=="Latest"?1:int(math.ceil(limit/2.0))
+            int minorLimit=oteAutoFibMode=="Latest"?1:math.max(1,limit-majorLimit)
+            f_drawFibBatch(oteFibSwingArchive,minorLimit,false,true)
+            f_drawFibBatch(oteFibMajorArchive,majorLimit,true,false)
 
 var table oteFibStatusTable=table.new(position.top_center,2,2,border_width=1)
 f_renderFibStatus() =>
     if oteAutoFibShow and oteAutoFibStatus
         bool swings=oteAutoFibSource=="Confirmed Swings"
-        int available=swings?array.size(oteFibSwingArchive):array.size(oteFibBreakArchive)
-        string source=swings?"SWING":"BREAK"
+        int minors=array.size(oteFibSwingArchive)
+        int majors=array.size(oteFibMajorArchive)
+        int available=not swings?array.size(oteFibBreakArchive):oteFibScale=="Minor"?minors:oteFibScale=="Major"?majors:minors+majors
+        string source=swings?"SWING · "+oteFibScale:"BREAK"
+        string detail=swings and oteFibScale=="Both"?"MJ "+str.tostring(majors)+" / MN "+str.tostring(minors):str.tostring(available)+" ranges"
         table.cell(oteFibStatusTable,0,0,"AUTO FIB · "+source,text_color=color.white,bgcolor=color.new(color.black,60))
-        table.cell(oteFibStatusTable,1,0,str.tostring(available)+" ranges",text_color=color.white,bgcolor=color.new(color.black,60))
+        table.cell(oteFibStatusTable,1,0,detail,text_color=color.white,bgcolor=color.new(color.black,60))
         table.cell(oteFibStatusTable,0,1,available>0?"Display":"Waiting",text_color=color.silver,bgcolor=color.new(color.black,70))
         table.cell(oteFibStatusTable,1,1,available>0?"READY":swings?"CONFIRMED PIVOTS":"STRUCTURAL BREAK",text_color=available>0?color.lime:color.orange,bgcolor=color.new(color.black,70))
 
