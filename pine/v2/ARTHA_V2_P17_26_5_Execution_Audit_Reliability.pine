@@ -3380,6 +3380,7 @@ type ShadowMidpointTrial
     bool reclaimSeen
 
 type ShadowReclaimTrial
+    string key
     int direction
     string poiType
     float entry
@@ -3408,6 +3409,17 @@ var array<ShadowPOISnapshot> shadowPriorPOIs=array.new<ShadowPOISnapshot>()
 var array<ShadowMidpointTrial> midpointTrials=array.new<ShadowMidpointTrial>()
 var array<ShadowReclaimTrial> reclaimTrials=array.new<ShadowReclaimTrial>()
 var map<string,int> midpointSeenAt=map.new<string,int>()
+// Terminal decisions are retained by source phase for matched-case analysis.
+// Once both methods resolve, one and only one pair is registered.
+var map<string,int> shadowMidTerminal=map.new<string,int>()
+var map<string,int> shadowReclaimTerminal=map.new<string,int>()
+var map<string,bool> shadowPairedDone=map.new<string,bool>()
+// Evidence: 0/1/2 lower-TF win/loss/uncertain;
+//           3/4/5 chart-OHLC fallback win/loss/uncertain.
+var array<int> shadowEvidence=array.from(0,0,0,0,0,0)
+// Matched resolved: both win / midpoint win reclaim loss /
+// midpoint loss reclaim win / both loss / noncomparable (uncertain/timeout).
+var array<int> shadowPairCounts=array.from(0,0,0,0,0)
 var array<int> shadowTouchesBySide=array.from(0,0,0,0,0,0,0,0)
 var array<int> shadowWinsBySide=array.from(0,0,0,0,0,0,0,0)
 var array<int> shadowLossBySide=array.from(0,0,0,0,0,0,0,0)
@@ -3430,6 +3442,20 @@ f_shadowBucket(string kind,int dir) =>
 
 f_shadowKey(UnifiedPOI p) =>
     p.sourceEngine+":"+str.tostring(p.sourceId)+":"+p.poiType
+
+f_shadowEvidenceAdd(int outcome,bool ltf) =>
+    int bucket=outcome==1?0:outcome==-1?1:2
+    if outcome!=0 and outcome!=2
+        int idx=bucket+(ltf?0:3)
+        array.set(shadowEvidence,idx,array.get(shadowEvidence,idx)+1)
+
+f_shadowPairRegister(string key) =>
+    if not map.contains(shadowPairedDone,key) and map.contains(shadowMidTerminal,key) and map.contains(shadowReclaimTerminal,key)
+        int midpointOutcome=map.get(shadowMidTerminal,key)
+        int reclaimOutcome=map.get(shadowReclaimTerminal,key)
+        int idx=midpointOutcome==1 and reclaimOutcome==1?0:midpointOutcome==1 and reclaimOutcome==-1?1:midpointOutcome==-1 and reclaimOutcome==1?2:midpointOutcome==-1 and reclaimOutcome==-1?3:4
+        array.set(shadowPairCounts,idx,array.get(shadowPairCounts,idx)+1)
+        map.put(shadowPairedDone,key,true)
 
 // Ordered intrabar arrays, requested once on every chart candle.
 // A matching/higher requested timeframe disables this shadow-only inspection.
@@ -3526,7 +3552,7 @@ f_updateExecutionAudit() =>
                             bool riskValid=t.direction==1?close>t.stop:close<t.stop
                             if riskValid and risk>=syminfo.mintick
                                 if array.size(reclaimTrials)<shadowMaxRecords
-                                    array.push(reclaimTrials,ShadowReclaimTrial.new(t.direction,t.poiType,close,t.stop,close+t.direction*risk,bar_index))
+                                    array.push(reclaimTrials,ShadowReclaimTrial.new(t.key,t.direction,t.poiType,close,t.stop,close+t.direction*risk,bar_index))
                                 else
                                     array.set(shadowStats,2,array.get(shadowStats,2)+1)
                 // Keep resolved touch trial until its EARLY matching window
