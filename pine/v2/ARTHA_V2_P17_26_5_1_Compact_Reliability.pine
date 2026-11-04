@@ -3380,7 +3380,6 @@ type ShadowMidpointTrial
     bool reclaimSeen
 
 type ShadowReclaimTrial
-    string key
     int direction
     string poiType
     float entry
@@ -3409,19 +3408,6 @@ var array<ShadowPOISnapshot> shadowPriorPOIs=array.new<ShadowPOISnapshot>()
 var array<ShadowMidpointTrial> midpointTrials=array.new<ShadowMidpointTrial>()
 var array<ShadowReclaimTrial> reclaimTrials=array.new<ShadowReclaimTrial>()
 var map<string,int> midpointSeenAt=map.new<string,int>()
-// Terminal decisions are retained by source phase for matched-case analysis.
-// Once both methods resolve, one and only one pair is registered.
-var map<string,int> shadowMidTerminal=map.new<string,int>()
-var map<string,int> shadowReclaimTerminal=map.new<string,int>()
-var map<string,bool> shadowPairedDone=map.new<string,bool>()
-// Evidence: 0/1/2 lower-TF win/loss/uncertain;
-//           3/4/5 chart-OHLC fallback win/loss/uncertain.
-var array<int> shadowEvidence=array.from(0,0,0,0,0,0)
-// Matched resolved: both win / midpoint win reclaim loss /
-// midpoint loss reclaim win / both loss / noncomparable (uncertain/timeout).
-var array<int> shadowPairCounts=array.from(0,0,0,0,0)
-// 0 original phase inverted, 1 source retired, 2 removed/filtered/trimmed.
-var array<int> shadowDisappearance=array.from(0,0,0)
 var array<int> shadowTouchesBySide=array.from(0,0,0,0,0,0,0,0)
 var array<int> shadowWinsBySide=array.from(0,0,0,0,0,0,0,0)
 var array<int> shadowLossBySide=array.from(0,0,0,0,0,0,0,0)
@@ -3435,6 +3421,8 @@ var array<int> shadowRTimeoutBySide=array.from(0,0,0,0,0,0,0,0)
 // Stats indices: 0 midpoint capacity, 1 key limit, 2 reclaim capacity,
 // 3 touch-bar uncertain, 4 existing EARLY matched, 5 retired/inverted on touch.
 var array<int> shadowStats=array.from(0,0,0,0,0,0,0,0,0,0)
+// 0-2 LTF win/loss/ambiguous, 3-5 fallback win/loss/ambiguous.
+var array<int> shadowEvidence=array.from(0,0,0,0,0,0)
 
 f_shadowTypeIndex(string kind) =>
     kind=="OB"?0:kind=="BB"?1:kind=="FVG"?2:3
@@ -3442,22 +3430,13 @@ f_shadowTypeIndex(string kind) =>
 f_shadowBucket(string kind,int dir) =>
     f_shadowTypeIndex(kind)*2+(dir==1?0:1)
 
+f_addShadowEvidence(int result,bool ltf) =>
+    if result==1 or result==-1 or result==3
+        int slot=(result==1?0:result==-1?1:2)+(ltf?0:3)
+        array.set(shadowEvidence,slot,array.get(shadowEvidence,slot)+1)
+
 f_shadowKey(UnifiedPOI p) =>
     p.sourceEngine+":"+str.tostring(p.sourceId)+":"+p.poiType
-
-f_shadowEvidenceAdd(int outcome,bool ltf) =>
-    int bucket=outcome==1?0:outcome==-1?1:2
-    if outcome!=0 and outcome!=2
-        int idx=bucket+(ltf?0:3)
-        array.set(shadowEvidence,idx,array.get(shadowEvidence,idx)+1)
-
-f_shadowPairRegister(string key) =>
-    if not map.contains(shadowPairedDone,key) and map.contains(shadowMidTerminal,key) and map.contains(shadowReclaimTerminal,key)
-        int midpointOutcome=map.get(shadowMidTerminal,key)
-        int reclaimOutcome=map.get(shadowReclaimTerminal,key)
-        int idx=midpointOutcome==1 and reclaimOutcome==1?0:midpointOutcome==1 and reclaimOutcome==-1?1:midpointOutcome==-1 and reclaimOutcome==1?2:midpointOutcome==-1 and reclaimOutcome==-1?3:4
-        array.set(shadowPairCounts,idx,array.get(shadowPairCounts,idx)+1)
-        map.put(shadowPairedDone,key,true)
 
 // Ordered intrabar arrays, requested once on every chart candle.
 // A matching/higher requested timeframe disables this shadow-only inspection.
@@ -3545,10 +3524,8 @@ f_updateExecutionAudit() =>
                     else if age>=shadowOutcomeHorizon
                         t.outcome:=2
                         array.set(shadowTimeoutBySide,bucket,array.get(shadowTimeoutBySide,bucket)+1)
-                    if t.outcome!=0 and not map.contains(shadowMidTerminal,t.key)
-                        map.put(shadowMidTerminal,t.key,t.outcome)
-                        f_shadowEvidenceAdd(t.outcome,sequence!=10)
-                        f_shadowPairRegister(t.key)
+                    if t.outcome!=0
+                        f_addShadowEvidence(t.outcome,sequence!=10)
                     if t.outcome==0 and not t.reclaimSeen and age<=shadowReclaimWindow
                         bool reclaimed=t.direction==1?(close>open and close>=t.entry):(close<open and close<=t.entry)
                         if reclaimed
@@ -3558,7 +3535,7 @@ f_updateExecutionAudit() =>
                             bool riskValid=t.direction==1?close>t.stop:close<t.stop
                             if riskValid and risk>=syminfo.mintick
                                 if array.size(reclaimTrials)<shadowMaxRecords
-                                    array.push(reclaimTrials,ShadowReclaimTrial.new(t.key,t.direction,t.poiType,close,t.stop,close+t.direction*risk,bar_index))
+                                    array.push(reclaimTrials,ShadowReclaimTrial.new(t.direction,t.poiType,close,t.stop,close+t.direction*risk,bar_index))
                                 else
                                     array.set(shadowStats,2,array.get(shadowStats,2)+1)
                 // Keep resolved touch trial until its EARLY matching window
@@ -3590,42 +3567,19 @@ f_updateExecutionAudit() =>
                         array.set(shadowRTimeoutBySide,b,array.get(shadowRTimeoutBySide,b)+1)
                         terminal:=true
                     if terminal
-                        int completedOutcome=sequence==3 or (sequence==10 and stopHit and targetHit) or (sequence==0 and (stopHit or targetHit))?3:(sequence==-1 or (sequence==10 and stopHit))?-1:(sequence==1 or (sequence==10 and targetHit))?1:2
-                        map.put(shadowReclaimTerminal,t.key,completedOutcome)
-                        f_shadowPairRegister(t.key)
                         array.remove(reclaimTrials,j)
 
 // Check whether a previously confirmed phase survived the current candle.
 // It is diagnostic ONLY: retirement does not affect shadow eligibility.
-// Return 0 if the exact earlier phase remains active, 1 if it flipped,
-// 2 if the source was retired, 3 if the registry no longer exposes it.
-f_snapshotChangeClass(string wantedKey) =>
-    int classification=3
-    bool exactPhase=false
+f_snapshotStillActive(string wantedKey) =>
+    bool found=false
     if array.size(unifiedPOIs)>0
         for k=0 to array.size(unifiedPOIs)-1
             UnifiedPOI live=array.get(unifiedPOIs,k)
             if f_shadowKey(live)==wantedKey
-                exactPhase:=true
+                found:=true
                 break
-    if exactPhase
-        classification:=0
-    else
-        if array.size(imbalanceZones)>0
-            for k=0 to array.size(imbalanceZones)-1
-                ImbalanceZone z=array.get(imbalanceZones,k)
-                string stem="IMBALANCE:"+str.tostring(z.id)+":"
-                if str.startswith(wantedKey,stem)
-                    classification:=z.state==2?2:(z.state==1 and str.endswith(wantedKey,":FVG"))?1:3
-                    break
-        if array.size(orderBlocks)>0
-            for k=0 to array.size(orderBlocks)-1
-                OrderBlockZone z=array.get(orderBlocks,k)
-                string stem="ORDERBLOCK:"+str.tostring(z.id)+":"
-                if str.startswith(wantedKey,stem)
-                    classification:=z.state==2?2:(z.state==1 and str.endswith(wantedKey,":OB"))?1:3
-                    break
-    classification
+    found
 
 // Arm midpoint touches from PREVIOUS BAR's confirmed source-phase snapshots,
 // NOT today's post-lifecycle registry. This includes POIs filled/retired/ flipped
@@ -3668,14 +3622,9 @@ f_armMidpointAudit() =>
                         else if result==-1
                             array.set(shadowStats,6,array.get(shadowStats,6)+1)
                             array.set(shadowLossBySide,bucket,array.get(shadowLossBySide,bucket)+1)
-                        if result!=0
-                            map.put(shadowMidTerminal,p.key,result)
-                            f_shadowEvidenceAdd(result,seq!=10)
-                            f_shadowPairRegister(p.key)
-                        int changeClass=f_snapshotChangeClass(p.key)
-                        if changeClass!=0
+                        f_addShadowEvidence(result,seq!=10)
+                        if not f_snapshotStillActive(p.key)
                             array.set(shadowStats,5,array.get(shadowStats,5)+1)
-                            array.set(shadowDisappearance,changeClass-1,array.get(shadowDisappearance,changeClass-1)+1)
                         array.push(midpointTrials,ShadowMidpointTrial.new(p.key,p.direction,p.poiType,midpoint,stop,target,bar_index,result,false))
 
 // Record NEXT bar's eligible POIs only after this bar's shadow touch has
@@ -3702,86 +3651,58 @@ f_matchExistingEarlyAudit() =>
             if bar_index>=firstTouch and bar_index-firstTouch<=shadowReclaimWindow
                 array.set(shadowStats,4,array.get(shadowStats,4)+1)
 
-// Compact presentation: preserve all audit registers, not the 25-row table.
-var table shadowAuditTable=table.new(position.bottom_left,4,16,border_width=1)
-f_auditCell(int column,int row,string value,color ink) =>
-    table.cell(shadowAuditTable,column,row,value,text_color=ink)
+// Compact evidence table: the existing by-direction counters remain intact.
+var table shadowAuditTable=table.new(position.bottom_left,4,12,border_width=1)
+f_auditCell(int c,int r,string value) =>
+    table.cell(shadowAuditTable,c,r,value,text_color=color.white)
 f_renderExecutionAudit() =>
     if showShadowAuditTable
-        f_auditCell(0,0,"POI · "+timeframe.period,color.white)
-        f_auditCell(1,0,"TOUCH",color.silver)
-        f_auditCell(2,0,"1R / SL",color.silver)
-        f_auditCell(3,0,"UNCERT",color.silver)
-        int sumTouch=0
-        int sumWins=0
-        int sumLoss=0
-        int sumAmb=0
+        f_auditCell(0,0,"POI · "+timeframe.period)
+        f_auditCell(1,0,"TOUCH")
+        f_auditCell(2,0,"W / L")
+        f_auditCell(3,0,"UNCERT")
         for k=0 to 3
-            int n=k*2
+            int b=k*2
             string nm=k==0?"OB":k==1?"BB":k==2?"FVG":"IFVG"
-            int t=array.get(shadowTouchesBySide,n)+array.get(shadowTouchesBySide,n+1)
-            int w=array.get(shadowWinsBySide,n)+array.get(shadowWinsBySide,n+1)
-            int l=array.get(shadowLossBySide,n)+array.get(shadowLossBySide,n+1)
-            int u=array.get(shadowAmbBySide,n)+array.get(shadowAmbBySide,n+1)
-            sumTouch+=t
-            sumWins+=w
-            sumLoss+=l
-            sumAmb+=u
-            f_auditCell(0,k+1,nm,color.silver)
-            f_auditCell(1,k+1,str.tostring(t),color.white)
-            f_auditCell(2,k+1,str.tostring(w)+"/"+str.tostring(l),color.white)
-            f_auditCell(3,k+1,str.tostring(u),color.orange)
-        f_auditCell(0,5,"TOTAL",color.white)
-        f_auditCell(1,5,str.tostring(sumTouch),color.white)
-        f_auditCell(2,5,str.tostring(sumWins)+"/"+str.tostring(sumLoss),color.white)
-        f_auditCell(3,5,str.tostring(sumAmb),color.orange)
-        int inspected=array.get(shadowStats,9)
-        int missing=array.get(shadowStats,7)
-        float pct=(inspected+missing)>0?100.0*inspected/(inspected+missing):na
+            f_auditCell(0,k+1,nm)
+            f_auditCell(1,k+1,str.tostring(array.get(shadowTouchesBySide,b)+array.get(shadowTouchesBySide,b+1)))
+            f_auditCell(2,k+1,str.tostring(array.get(shadowWinsBySide,b)+array.get(shadowWinsBySide,b+1))+"/"+str.tostring(array.get(shadowLossBySide,b)+array.get(shadowLossBySide,b+1)))
+            f_auditCell(3,k+1,str.tostring(array.get(shadowAmbBySide,b)+array.get(shadowAmbBySide,b+1)))
         int lW=array.get(shadowEvidence,0)
         int lL=array.get(shadowEvidence,1)
         int hW=array.get(shadowEvidence,3)
         int hL=array.get(shadowEvidence,4)
-        f_auditCell(0,6,"LTF W/L/?",color.silver)
-        f_auditCell(1,6,str.tostring(lW)+"/"+str.tostring(lL),color.white)
-        f_auditCell(2,6,"Uncertain",color.silver)
-        f_auditCell(3,6,str.tostring(array.get(shadowEvidence,2)),color.orange)
-        f_auditCell(0,7,"OHLC W/L/?",color.silver)
-        f_auditCell(1,7,str.tostring(hW)+"/"+str.tostring(hL),color.white)
-        f_auditCell(2,7,"Uncertain",color.silver)
-        f_auditCell(3,7,str.tostring(array.get(shadowEvidence,5)),color.orange)
-        f_auditCell(0,8,"LTF resolved %",color.silver)
-        f_auditCell(1,8,lW+lL>0?str.tostring(100.0*lW/(lW+lL),"#.0")+"%":"—",color.white)
-        f_auditCell(2,8,"OHLC resolved",color.silver)
-        f_auditCell(3,8,hW+hL>0?str.tostring(100.0*hW/(hW+hL),"#.0")+"%":"—",color.white)
-        f_auditCell(0,9,"LTF coverage",color.silver)
-        f_auditCell(1,9,na(pct)?"N/A":str.tostring(pct,"#.0")+"%",color.white)
-        f_auditCell(2,9,"QUALITY",color.silver)
-        f_auditCell(3,9,na(pct)?"NO DATA":pct>=80?"OK":"LOW",color.orange)
-        f_auditCell(0,10,"LTF inspected",color.silver)
-        f_auditCell(1,10,str.tostring(inspected),color.white)
-        f_auditCell(2,10,"Unavailable",color.silver)
-        f_auditCell(3,10,str.tostring(missing),color.orange)
-        f_auditCell(0,11,"Paired WW/WL",color.silver)
-        f_auditCell(1,11,str.tostring(array.get(shadowPairCounts,0))+"/"+str.tostring(array.get(shadowPairCounts,1)),color.white)
-        f_auditCell(2,11,"Paired LW/LL",color.silver)
-        f_auditCell(3,11,str.tostring(array.get(shadowPairCounts,2))+"/"+str.tostring(array.get(shadowPairCounts,3)),color.white)
-        f_auditCell(0,12,"Unpaired/uncert",color.silver)
-        f_auditCell(1,12,str.tostring(array.get(shadowPairCounts,4)),color.orange)
-        f_auditCell(2,12,"EARLY matched",color.silver)
-        f_auditCell(3,12,str.tostring(array.get(shadowStats,4)),color.white)
-        f_auditCell(0,13,"Inverted",color.silver)
-        f_auditCell(1,13,str.tostring(array.get(shadowDisappearance,0)),color.white)
-        f_auditCell(2,13,"Retired",color.silver)
-        f_auditCell(3,13,str.tostring(array.get(shadowDisappearance,1)),color.white)
-        f_auditCell(0,14,"Other removed",color.silver)
-        f_auditCell(1,14,str.tostring(array.get(shadowDisappearance,2)),color.white)
-        f_auditCell(2,14,"Capacity skip",color.silver)
-        f_auditCell(3,14,str.tostring(array.get(shadowStats,0)+array.get(shadowStats,2)),color.orange)
-        f_auditCell(0,15,"Active M/R",color.silver)
-        f_auditCell(1,15,str.tostring(array.size(midpointTrials))+"/"+str.tostring(array.size(reclaimTrials)),color.white)
-        f_auditCell(2,15,"Ledger cap",color.silver)
-        f_auditCell(3,15,str.tostring(array.get(shadowStats,1)),color.orange)
+        f_auditCell(0,5,"LTF W/L/?")
+        f_auditCell(1,5,str.tostring(lW)+"/"+str.tostring(lL))
+        f_auditCell(2,5,"Uncertain")
+        f_auditCell(3,5,str.tostring(array.get(shadowEvidence,2)))
+        f_auditCell(0,6,"OHLC W/L/?")
+        f_auditCell(1,6,str.tostring(hW)+"/"+str.tostring(hL))
+        f_auditCell(2,6,"Uncertain")
+        f_auditCell(3,6,str.tostring(array.get(shadowEvidence,5)))
+        f_auditCell(0,7,"LTF rate")
+        f_auditCell(1,7,lW+lL>0?str.tostring(100.0*lW/(lW+lL),"#.0")+"%":"—")
+        f_auditCell(2,7,"OHLC rate")
+        f_auditCell(3,7,hW+hL>0?str.tostring(100.0*hW/(hW+hL),"#.0")+"%":"—")
+        int yes=array.get(shadowStats,9)
+        int no=array.get(shadowStats,7)
+        float pct=yes+no>0?100.0*yes/(yes+no):na
+        f_auditCell(0,8,"LTF coverage")
+        f_auditCell(1,8,na(pct)?"N/A":str.tostring(pct,"#.0")+"%")
+        f_auditCell(2,8,"Status")
+        f_auditCell(3,8,na(pct)?"NO DATA":pct>=80?"OK":"LOW")
+        f_auditCell(0,9,"Inspected")
+        f_auditCell(1,9,str.tostring(yes))
+        f_auditCell(2,9,"Unavailable")
+        f_auditCell(3,9,str.tostring(no))
+        f_auditCell(0,10,"Matched EARLY")
+        f_auditCell(1,10,str.tostring(array.get(shadowStats,4)))
+        f_auditCell(2,10,"Phase missing")
+        f_auditCell(3,10,str.tostring(array.get(shadowStats,5)))
+        f_auditCell(0,11,"Active M/R")
+        f_auditCell(1,11,str.tostring(array.size(midpointTrials))+"/"+str.tostring(array.size(reclaimTrials)))
+        f_auditCell(2,11,"Capacity skip")
+        f_auditCell(3,11,str.tostring(array.get(shadowStats,0)+array.get(shadowStats,2)))
 
 // Calls are read-only with respect to the core strategy. Audit counters and
 // shadow arrays/maps are independent of the live trade/risk-plan state.
