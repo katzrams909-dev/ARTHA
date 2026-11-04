@@ -3444,10 +3444,13 @@ f_updateOTEShadow() =>
 int oteMajorBars=math.max(oteMajorStrength,xLen+2)
 float oteMajorPH=ta.pivothigh(high,oteMajorBars,oteMajorBars)
 float oteMajorPL=ta.pivotlow(low,oteMajorBars,oteMajorBars)
-var float oteMajorHigh=na
-var float oteMajorLow=na
-var int oteMajorHighBar=na
-var int oteMajorLowBar=na
+type OTEPivotState
+    float highPrice
+    float lowPrice
+    int highBar
+    int lowBar
+
+var array<OTEPivotState> oteMajorState=array.from(OTEPivotState.new(na,na,na,na))
 
 f_storeAutoFibRange(array<OTEShadowRange> dest,int direction,int originBar,float origin,float extreme) =>
     float span=math.abs(extreme-origin)
@@ -3460,19 +3463,21 @@ f_storeAutoFibRange(array<OTEShadowRange> dest,int direction,int originBar,float
             array.shift(dest)
 
 f_archiveMajorFib() =>
-    if barstate.isconfirmed
+    if barstate.isconfirmed and (not na(oteMajorPH) or not na(oteMajorPL))
+        OTEPivotState st=array.get(oteMajorState,0)
         bool newHigh=not na(oteMajorPH)
         bool newLow=not na(oteMajorPL)
         if newHigh
-            oteMajorHigh:=oteMajorPH
-            oteMajorHighBar:=bar_index-oteMajorBars
+            st.highPrice:=oteMajorPH
+            st.highBar:=bar_index-oteMajorBars
         if newLow
-            oteMajorLow:=oteMajorPL
-            oteMajorLowBar:=bar_index-oteMajorBars
-        bool up=newHigh and not na(oteMajorLowBar) and oteMajorHighBar>oteMajorLowBar and oteMajorHigh>oteMajorLow
-        bool down=newLow and not na(oteMajorHighBar) and oteMajorLowBar>oteMajorHighBar and oteMajorHigh>oteMajorLow
+            st.lowPrice:=oteMajorPL
+            st.lowBar:=bar_index-oteMajorBars
+        bool up=newHigh and not na(st.lowBar) and st.highBar>st.lowBar and st.highPrice>st.lowPrice
+        bool down=newLow and not na(st.highBar) and st.lowBar>st.highBar and st.highPrice>st.lowPrice
         if up or down
-            f_storeAutoFibRange(oteFibMajorArchive,up?1:-1,up?oteMajorLowBar:oteMajorHighBar,up?oteMajorLow:oteMajorHigh,up?oteMajorHigh:oteMajorLow)
+            f_storeAutoFibRange(oteFibMajorArchive,up?1:-1,up?st.lowBar:st.highBar,up?st.lowPrice:st.highPrice,up?st.highPrice:st.lowPrice)
+        array.set(oteMajorState,0,st)
 
 // A new confirmed external high or low completes a directionally ordered
 // swing pair. No unconfirmed future pivot is consulted.
