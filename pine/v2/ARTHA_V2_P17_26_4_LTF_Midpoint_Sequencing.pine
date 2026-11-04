@@ -3542,15 +3542,16 @@ f_updateExecutionAudit() =>
                 if age>0
                     bool stopHit=t.direction==1?low<=t.stop:high>=t.stop
                     bool targetHit=t.direction==1?high>=t.target:low<=t.target
+                    int sequence=f_shadowLTFOutcome(t.direction,t.entry,t.stop,t.target,false)
                     int b=f_shadowBucket(t.poiType,t.direction)
                     bool terminal=false
-                    if stopHit and targetHit
+                    if sequence==3 or (sequence==10 and stopHit and targetHit)
                         array.set(shadowRAmbBySide,b,array.get(shadowRAmbBySide,b)+1)
                         terminal:=true
-                    else if stopHit
+                    else if sequence==-1 or (sequence==10 and stopHit)
                         array.set(shadowRLossBySide,b,array.get(shadowRLossBySide,b)+1)
                         terminal:=true
-                    else if targetHit
+                    else if sequence==1 or (sequence==10 and targetHit)
                         array.set(shadowRWinBySide,b,array.get(shadowRWinBySide,b)+1)
                         terminal:=true
                     else if age>=shadowOutcomeHorizon
