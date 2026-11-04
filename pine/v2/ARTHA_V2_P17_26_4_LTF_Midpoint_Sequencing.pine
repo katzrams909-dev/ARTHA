@@ -3467,7 +3467,7 @@ f_shadowLTFOutcome(int dir,float entry,float stop,float target,bool touchBar) =>
                 bool stopped=dir==1?l<=stop:h>=stop
                 bool targeted=dir==1?h>=target:l<=target
                 if stopped or targeted
-                    outcome=stopped and targeted?3:stopped?-1:1
+                    outcome:=stopped and targeted?3:stopped?-1:1
                     break
         if touchBar and not filled and outcome==0
             outcome:=3
@@ -3504,13 +3504,14 @@ f_updateExecutionAudit() =>
                 if age>0 and t.outcome==0
                     bool stopHit=t.direction==1?low<=t.stop:high>=t.stop
                     bool targetHit=t.direction==1?high>=t.target:low<=t.target
-                    if stopHit and targetHit
+                    int sequence=f_shadowLTFOutcome(t.direction,t.entry,t.stop,t.target,false)
+                    if sequence==3 or (sequence==10 and stopHit and targetHit)
                         t.outcome:=3
                         array.set(shadowAmbBySide,bucket,array.get(shadowAmbBySide,bucket)+1)
-                    else if stopHit
+                    else if sequence==-1 or (sequence==10 and stopHit)
                         t.outcome:=-1
                         array.set(shadowLossBySide,bucket,array.get(shadowLossBySide,bucket)+1)
-                    else if targetHit
+                    else if sequence==1 or (sequence==10 and targetHit)
                         t.outcome:=1
                         array.set(shadowWinsBySide,bucket,array.get(shadowWinsBySide,bucket)+1)
                     else if age>=shadowOutcomeHorizon
