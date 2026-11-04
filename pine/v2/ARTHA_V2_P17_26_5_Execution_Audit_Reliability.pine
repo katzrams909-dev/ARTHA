@@ -3702,7 +3702,7 @@ f_matchExistingEarlyAudit() =>
             if bar_index>=firstTouch and bar_index-firstTouch<=shadowReclaimWindow
                 array.set(shadowStats,4,array.get(shadowStats,4)+1)
 
-var table shadowAuditTable=table.new(position.bottom_left,7,17,border_width=1)
+var table shadowAuditTable=table.new(position.bottom_left,7,25,border_width=1)
 f_renderExecutionAudit() =>
     if showShadowAuditTable
         color hd=color.rgb(35,45,60)
@@ -3784,6 +3784,43 @@ f_renderExecutionAudit() =>
         table.cell(shadowAuditTable,1,16,str.tostring(array.get(shadowStats,8)),text_color=color.orange)
         table.cell(shadowAuditTable,3,16,"LTF inspected",text_color=color.silver)
         table.cell(shadowAuditTable,4,16,str.tostring(array.get(shadowStats,9)),text_color=color.white)
+        int audited=array.get(shadowStats,9)+array.get(shadowStats,7)
+        float coverage=audited>0?100.0*array.get(shadowStats,9)/audited:na
+        string coverageText=na(coverage)?"N/A":str.tostring(coverage,"#.0")+"%"
+        table.cell(shadowAuditTable,0,17,"LTF coverage",text_color=color.silver)
+        table.cell(shadowAuditTable,1,17,coverageText,text_color=not na(coverage) and coverage>=80?color.lime:color.orange)
+        table.cell(shadowAuditTable,3,17,"Coverage status",text_color=color.silver)
+        table.cell(shadowAuditTable,4,17,na(coverage)?"NO DATA":coverage>=80?"USABLE":"LOW",text_color=not na(coverage) and coverage>=80?color.lime:color.orange)
+        table.cell(shadowAuditTable,0,18,"LTF W / L / ?",text_color=color.silver)
+        table.cell(shadowAuditTable,1,18,str.tostring(array.get(shadowEvidence,0))+"/"+str.tostring(array.get(shadowEvidence,1))+"/"+str.tostring(array.get(shadowEvidence,2)),text_color=color.white)
+        table.cell(shadowAuditTable,3,18,"OHLC W / L / ?",text_color=color.silver)
+        table.cell(shadowAuditTable,4,18,str.tostring(array.get(shadowEvidence,3))+"/"+str.tostring(array.get(shadowEvidence,4))+"/"+str.tostring(array.get(shadowEvidence,5)),text_color=color.white)
+        int ltResolved=array.get(shadowEvidence,0)+array.get(shadowEvidence,1)
+        int ohResolved=array.get(shadowEvidence,3)+array.get(shadowEvidence,4)
+        table.cell(shadowAuditTable,0,19,"LTF resolved %",text_color=color.silver)
+        table.cell(shadowAuditTable,1,19,ltResolved>0?str.tostring(100.0*array.get(shadowEvidence,0)/ltResolved,"#.0")+"%":"—",text_color=color.white)
+        table.cell(shadowAuditTable,3,19,"OHLC resolved %",text_color=color.silver)
+        table.cell(shadowAuditTable,4,19,ohResolved>0?str.tostring(100.0*array.get(shadowEvidence,3)/ohResolved,"#.0")+"%":"—",text_color=color.white)
+        int pairedResolved=array.get(shadowPairCounts,0)+array.get(shadowPairCounts,1)+array.get(shadowPairCounts,2)+array.get(shadowPairCounts,3)
+        table.cell(shadowAuditTable,0,20,"Paired resolved",text_color=color.silver)
+        table.cell(shadowAuditTable,1,20,str.tostring(pairedResolved),text_color=color.white)
+        table.cell(shadowAuditTable,3,20,"Noncomparable",text_color=color.silver)
+        table.cell(shadowAuditTable,4,20,str.tostring(array.get(shadowPairCounts,4)),text_color=color.orange)
+        table.cell(shadowAuditTable,0,21,"Both win",text_color=color.silver)
+        table.cell(shadowAuditTable,1,21,str.tostring(array.get(shadowPairCounts,0)),text_color=color.lime)
+        table.cell(shadowAuditTable,3,21,"Both loss",text_color=color.silver)
+        table.cell(shadowAuditTable,4,21,str.tostring(array.get(shadowPairCounts,3)),text_color=color.red)
+        table.cell(shadowAuditTable,0,22,"Mid only win",text_color=color.silver)
+        table.cell(shadowAuditTable,1,22,str.tostring(array.get(shadowPairCounts,1)),text_color=color.white)
+        table.cell(shadowAuditTable,3,22,"Reclaim only win",text_color=color.silver)
+        table.cell(shadowAuditTable,4,22,str.tostring(array.get(shadowPairCounts,2)),text_color=color.white)
+        table.cell(shadowAuditTable,0,23,"Phase inversions",text_color=color.silver)
+        table.cell(shadowAuditTable,1,23,str.tostring(array.get(shadowDisappearance,0)),text_color=color.orange)
+        table.cell(shadowAuditTable,3,23,"Source retired",text_color=color.silver)
+        table.cell(shadowAuditTable,4,23,str.tostring(array.get(shadowDisappearance,1)),text_color=color.orange)
+        table.cell(shadowAuditTable,0,24,"Removed/filtered",text_color=color.silver)
+        table.cell(shadowAuditTable,1,24,str.tostring(array.get(shadowDisappearance,2)),text_color=color.orange)
+        table.cell(shadowAuditTable,3,24,"P17.26.5",text_color=color.silver)
 
 // Calls are read-only with respect to the core strategy. Audit counters and
 // shadow arrays/maps are independent of the live trade/risk-plan state.
