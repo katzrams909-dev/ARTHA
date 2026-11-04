@@ -351,6 +351,7 @@ bool showShadowAuditTable=input.bool(false,"Display midpoint shadow audit table"
 string G143="14C Structural OTE Shadow"
 bool oteShadowEnabled=input.bool(true,"Enable OTE shadow observations (no signals)",group=G143)
 bool oteShowTable=input.bool(false,"Show OTE shadow dashboard",group=G143)
+bool oteRequireDSP=input.bool(true,"Require qualified displacement at structural break",group=G143)
 int oteMaxAge=input.int(35,"OTE observation window (chart bars)",minval=5,maxval=200,group=G143)
 float oteMinRangeATR=input.float(1.0,"Minimum confirmed impulse range (ATR)",minval=0.1,maxval=15.0,step=0.5,group=G143)
 int oteMaxRecords=input.int(80,"Maximum retained OTE observations",minval=20,maxval=160,group=G143)
@@ -3738,7 +3739,7 @@ type OTEShadowRange
 var array<OTEShadowRange> oteRanges=array.new<OTEShadowRange>()
 // Counts: built, band touches, 70.5% touches, POI overlap at creation,
 // band touches with confluence, expired without touch, rejected geometry.
-var array<int> oteCounts=array.from(0,0,0,0,0,0,0)
+var array<int> oteCounts=array.from(0,0,0,0,0,0,0,0)
 
 f_oteOverlapsPOI(int dir,float top,float bottom) =>
     bool found=false
@@ -3772,7 +3773,7 @@ if oteShadowEnabled and barstate.isconfirmed
                     t.hit705:=true
                     array.set(oteCounts,2,array.get(oteCounts,2)+1)
                 array.set(oteRanges,n,t)
-    int newDir=xBullBreak?1:xBearBreak?-1:0
+    int newDir=(xBullBreak and (not oteRequireDSP or bullDisplacementEvent))?1:(xBearBreak and (not oteRequireDSP or bearDisplacementEvent))?-1:0
     if newDir!=0
         float origin=newDir==1?xLow:xHigh
         float extreme=newDir==1?high:low
@@ -3791,10 +3792,11 @@ if oteShadowEnabled and barstate.isconfirmed
                 array.set(oteCounts,3,array.get(oteCounts,3)+1)
             if array.size(oteRanges)>oteMaxRecords
                 array.shift(oteRanges)
+                array.set(oteCounts,7,array.get(oteCounts,7)+1)
         else
             array.set(oteCounts,6,array.get(oteCounts,6)+1)
 
-var table oteAuditTable=table.new(position.top_left,2,8,border_width=1)
+var table oteAuditTable=table.new(position.top_left,2,9,border_width=1)
 if barstate.islast and oteShowTable
     table.cell(oteAuditTable,0,0,"OTE SHADOW · "+timeframe.period,text_color=color.white)
     table.cell(oteAuditTable,1,0,"P17.27",text_color=color.white)
@@ -3812,6 +3814,8 @@ if barstate.islast and oteShowTable
     table.cell(oteAuditTable,1,6,str.tostring(array.get(oteCounts,5)))
     table.cell(oteAuditTable,0,7,"Active / rejected")
     table.cell(oteAuditTable,1,7,str.tostring(array.size(oteRanges))+" / "+str.tostring(array.get(oteCounts,6)))
+    table.cell(oteAuditTable,0,8,"Record cap evictions")
+    table.cell(oteAuditTable,1,8,str.tostring(array.get(oteCounts,7)))
 
 //=============================================================================
 // RISK & TARGET ENGINE
