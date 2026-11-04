@@ -3498,11 +3498,23 @@ f_drawOTEAutoFib() =>
                         label tag=label.new(right,level,name,xloc=xloc.bar_index,style=label.style_label_left,textcolor=ink,color=color.new(color.black,85),size=size.tiny)
                         array.push(oteFibLabels,tag)
 
+var table oteFibStatusTable=table.new(position.top_center,2,2,border_width=1)
+f_renderFibStatus() =>
+    if oteAutoFibShow and oteAutoFibStatus
+        bool swings=oteAutoFibSource=="Confirmed Swings"
+        int available=swings?array.size(oteFibSwingArchive):array.size(oteFibBreakArchive)
+        string source=swings?"SWING":"BREAK"
+        table.cell(oteFibStatusTable,0,0,"AUTO FIB · "+source,text_color=color.white,bgcolor=color.new(color.black,60))
+        table.cell(oteFibStatusTable,1,0,str.tostring(available)+" ranges",text_color=color.white,bgcolor=color.new(color.black,60))
+        table.cell(oteFibStatusTable,0,1,available>0?"Display":"Waiting",text_color=color.silver,bgcolor=color.new(color.black,70))
+        table.cell(oteFibStatusTable,1,1,available>0?"READY":swings?"CONFIRMED PIVOTS":"STRUCTURAL BREAK",text_color=available>0?color.lime:color.orange,bgcolor=color.new(color.black,70))
+
 // Keep OTE range updates and Auto Fib drawing isolated from the main body.
 f_updateOTEShadow()
 f_archiveConfirmedSwingFib()
 if barstate.islast
     f_drawOTEAutoFib()
+    f_renderFibStatus()
 
 //=============================================================================
 // RISK & TARGET ENGINE
