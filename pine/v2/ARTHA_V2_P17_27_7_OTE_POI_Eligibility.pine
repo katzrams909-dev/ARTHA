@@ -3400,16 +3400,6 @@ var array<OTEShadowRange> oteFibSwingArchive=array.new<OTEShadowRange>()
 var array<OTEShadowRange> oteFibMajorArchive=array.new<OTEShadowRange>()
 var array<OTEShadowRange> oteFibBreakArchive=array.new<OTEShadowRange>()
 
-f_oteOverlapsPOI(int dir,float top,float bottom) =>
-    bool found=false
-    if array.size(unifiedPOIs)>0
-        for n=0 to array.size(unifiedPOIs)-1
-            UnifiedPOI p=array.get(unifiedPOIs,n)
-            if p.direction==dir and p.top>=bottom and p.bottom<=top
-                found:=true
-                break
-    found
-
 // Unified registry contains only actionable native FVG/IFVG/OB/BB POIs.
 // No synthetic POI is created; direction and strict price intersection required.
 f_otePOIIndex(int dir,float top,float bottom) =>
@@ -3417,7 +3407,7 @@ f_otePOIIndex(int dir,float top,float bottom) =>
     if array.size(unifiedPOIs)>0
         for n=0 to array.size(unifiedPOIs)-1
             UnifiedPOI p=array.get(unifiedPOIs,n)
-            if p.direction==dir and p.top>bottom and p.bottom<top and p.bornBar<=bar_index
+            if p.direction==dir and p.top>bottom and p.bottom<top and p.bornBar<bar_index
                 matched:=n
                 break
     matched
