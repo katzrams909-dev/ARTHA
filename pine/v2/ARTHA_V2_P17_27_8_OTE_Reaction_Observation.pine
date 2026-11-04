@@ -3617,7 +3617,13 @@ f_drawOTEAutoFib() =>
             f_drawFibBatch(oteFibSwingArchive,minorLimit,false,true)
             f_drawFibBatch(oteFibMajorArchive,majorLimit,true,false)
 
-var table oteFibStatusTable=table.new(position.top_center,2,4,border_width=1)
+var table oteFibStatusTable=table.new(position.top_center,2,5,border_width=1)
+f_oteReactionStage(array<OTEShadowRange> book) =>
+    string stage="WAITING"
+    if array.size(book)>0
+        OTEShadowRange t=array.get(book,array.size(book)-1)
+        stage=t.retestSeen?"RETEST":t.confirmedSeen?"CONFIRMED":t.aggressiveSeen?"REJECTION":t.qualifiedTouch?"QUALIFIED TOUCH":t.touched?"NO POI TOUCH":"AWAITING POI"
+    stage
 f_oteCandidateStatus(array<OTEShadowRange> book) =>
     string status="NO RANGE"
     if array.size(book)>0
@@ -3643,6 +3649,10 @@ f_renderFibStatus() =>
             if swings and oteFibScale=="Both"
                 table.cell(oteFibStatusTable,0,3,"MAJOR POI",text_color=color.silver,bgcolor=color.new(color.black,70))
                 table.cell(oteFibStatusTable,1,3,f_oteCandidateStatus(oteFibMajorArchive),text_color=color.white,bgcolor=color.new(color.black,70))
+        if oteReactionStatus
+            array<OTEShadowRange> reactionBook=not swings?oteFibBreakArchive:oteFibScale=="Major"?oteFibMajorArchive:oteFibSwingArchive
+            table.cell(oteFibStatusTable,0,4,"OTE REACTION",text_color=color.silver,bgcolor=color.new(color.black,70))
+            table.cell(oteFibStatusTable,1,4,f_oteReactionStage(reactionBook),text_color=color.white,bgcolor=color.new(color.black,70))
 
 // Keep OTE range updates and Auto Fib drawing isolated from the main body.
 f_updateOTEShadow()
