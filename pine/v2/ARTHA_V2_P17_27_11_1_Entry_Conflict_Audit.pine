@@ -4070,9 +4070,17 @@ if anySignal
         string rejectionReason=not stopSideAccepted?"STOP WRONG SIDE":not stopDistanceAccepted?"STOP > "+str.tostring(maxStopDistanceATR,"#.##")+" ATR":"TARGET RR LIMITS"
         lastPlanText:="RISK FILTER · "+rejectionReason
         lastSignalText:="RISK FILTER · "+rejectionReason
+        // A rejected EARLY attempt must not lock the early reentry state.
+        if signalSource=="EARLY"
+            if dir==1 and lastBullEarlySignalBar==bar_index
+                lastBullEarlySignalBar:=na
+                lastBullEarlyEpisodeId:=na
+            if dir==-1 and lastBearEarlySignalBar==bar_index
+                lastBearEarlySignalBar:=na
+                lastBearEarlyEpisodeId:=na
         if not na(planSignalMarker)
             if showRejectedSignalMarkers
-                label.set_text(planSignalMarker,"× "+family+" "+(dir==1?"BUY":"SELL")+" · "+signalSource+"\\nREJECTED · "+rejectionReason)
+                label.set_text(planSignalMarker,"× "+family+" "+(dir==1?"BUY":"SELL")+" · "+signalSource+"\nREJECTED · "+rejectionReason)
                 label.set_color(planSignalMarker,color.new(color.gray,30))
                 label.set_textcolor(planSignalMarker,color.white)
             else
