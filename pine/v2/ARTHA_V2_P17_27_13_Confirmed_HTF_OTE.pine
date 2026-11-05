@@ -3537,7 +3537,7 @@ f_archiveHTFOTE() =>
         bool up=oteHTFHiTime>oteHTFLoTime
         int eventTime=up?oteHTFHiTime:oteHTFLoTime
         int priorTime=array.get(oteHTFLastPivot,0)
-        if eventTime!=priorTime
+        if oteHTFHiTime!=oteHTFLoTime and (na(priorTime) or eventTime!=priorTime)
             array.set(oteHTFLastPivot,0,eventTime)
             int dir=up?1:-1
             float origin=up?oteHTFLo:oteHTFHi
