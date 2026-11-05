@@ -329,7 +329,6 @@ int auditConfirmBars=input.int(5,"Reaction confirmation window (bars, including 
 int earlyMinBarsAfterTouch=input.int(0,"EARLY · Minimum bars after POI touch",minval=0,maxval=3,group=G14)
 string earlyPOIFill=input.string("25%","EARLY · Minimum POI penetration",options=["15%","25%","50%","75%","100%"],group=G14)
 string earlyPenetrationBasis=input.string("Wick or body","EARLY · POI penetration source",options=["Wick or body","Wick only","Body only"],group=G14)
-string earlyCloseMode=input.string("Directional rejection","EARLY · Confirmed touch candle close",options=["Directional rejection","Midpoint reclaim","Boundary reclaim"],group=G14)
 string reactionPOIFillTrigger=input.string("50%","MISS · Required POI fill",options=["15%","25%","50%","75%","100%","100% + Sweep"],group=G14)
 bool auditAllowSameBar=input.bool(true,"Allow touch-bar confirmation",group=G14)
 string auditConfirmationMode=input.string("Directional Close","Close confirmation",options=["Directional Close","Midpoint Reclaim","Any Valid Close"],group=G14)
@@ -3132,7 +3131,10 @@ f_auditInteractionPOI(int dir) =>
             bool familyOK=not auditPrimaryOnly or p.primary
             bool missREV=dir==1?(bullREVState>=3 and bullREVState<=4 and p.sourceEngine==bullREVPOIEngine and p.sourceId==bullREVPOIId):(bearREVState>=3 and bearREVState<=4 and p.sourceEngine==bearREVPOIEngine and p.sourceId==bearREVPOIId)
             bool missCONT=dir==1?(bullCONTState>=2 and bullCONTState<=3 and p.sourceEngine==bullCONTPOIEngine and p.sourceId==bullCONTPOIId):(bearCONTState>=2 and bearCONTState<=3 and p.sourceEngine==bearCONTPOIEngine and p.sourceId==bearCONTPOIId)
-            bool touch=p.direction==dir and familyOK and ((missREV or missCONT)?f_poiFillReached(dir,p.top,p.bottom):f_earlyFillReached(dir,p.top,p.bottom))
+            bool earlyTouch=f_earlyFillReached(dir,p.top,p.bottom)
+            bool earlyInside=earlyTouch and f_earlyTouchClose(dir,p.top,p.bottom)
+            bool missedTouch=f_poiFillReached(dir,p.top,p.bottom)
+            bool touch=p.direction==dir and familyOK and ((missREV or missCONT)?(missedTouch or earlyInside):earlyTouch)
             if touch
                 bool recentREV=dir==1?(not na(lastBullREVContextBar) and bar_index-lastBullREVContextBar<=auditContextBars and (na(lastBearREVContextBar) or lastBullREVContextBar>lastBearREVContextBar)):(not na(lastBearREVContextBar) and bar_index-lastBearREVContextBar<=auditContextBars and (na(lastBullREVContextBar) or lastBearREVContextBar>lastBullREVContextBar))
                 bool recentCONT=dir==1?(xTrend==1 and not na(lastBullCONTContextBar) and bar_index-lastBullCONTContextBar<=auditContextBars and (na(lastBearCONTContextBar) or lastBullCONTContextBar>lastBearCONTContextBar)):(xTrend==-1 and not na(lastBearCONTContextBar) and bar_index-lastBearCONTContextBar<=auditContextBars and (na(lastBullCONTContextBar) or lastBearCONTContextBar>lastBullCONTContextBar))
@@ -3159,7 +3161,8 @@ if enableReactionSignals and bullRxIdx>=0 and na(bullRxPOIId)
     bool missCONT=bullCONTState>=2 and bullCONTState<=3 and p.sourceEngine==bullCONTPOIEngine and p.sourceId==bullCONTPOIId
     bool recentREV=not na(lastBullREVContextBar) and bar_index-lastBullREVContextBar<=auditContextBars and (na(lastBearREVContextBar) or lastBullREVContextBar>lastBearREVContextBar)
     bool recentCONT=xTrend==1 and not na(lastBullCONTContextBar) and bar_index-lastBullCONTContextBar<=auditContextBars and (na(lastBearCONTContextBar) or lastBullCONTContextBar>lastBearCONTContextBar)
-    string kind=(missREV or missCONT)?"MISSED":(recentREV or recentCONT)?"EARLY":"RAW"
+    bool classifyEarly=f_earlyFillReached(1,p.top,p.bottom) and f_earlyTouchClose(1,p.top,p.bottom)
+    string kind=(missREV or missCONT) and not classifyEarly?"MISSED":(missREV or missCONT or recentREV or recentCONT)?"EARLY":"RAW"
     string fam=missREV?"REV":missCONT?"CONT":recentREV and (not recentCONT or lastBullREVContextBar>=lastBullCONTContextBar)?"REV":recentCONT?"CONT":"NONE"
     if kind!="RAW"
         bullRxEngine:=p.sourceEngine
@@ -3179,7 +3182,8 @@ if enableReactionSignals and bearRxIdx>=0 and na(bearRxPOIId)
     bool missCONT=bearCONTState>=2 and bearCONTState<=3 and p.sourceEngine==bearCONTPOIEngine and p.sourceId==bearCONTPOIId
     bool recentREV=not na(lastBearREVContextBar) and bar_index-lastBearREVContextBar<=auditContextBars and (na(lastBullREVContextBar) or lastBearREVContextBar>lastBullREVContextBar)
     bool recentCONT=xTrend==-1 and not na(lastBearCONTContextBar) and bar_index-lastBearCONTContextBar<=auditContextBars and (na(lastBullCONTContextBar) or lastBearCONTContextBar>lastBullCONTContextBar)
-    string kind=(missREV or missCONT)?"MISSED":(recentREV or recentCONT)?"EARLY":"RAW"
+    bool classifyEarly=f_earlyFillReached(-1,p.top,p.bottom) and f_earlyTouchClose(-1,p.top,p.bottom)
+    string kind=(missREV or missCONT) and not classifyEarly?"MISSED":(missREV or missCONT or recentREV or recentCONT)?"EARLY":"RAW"
     string fam=missREV?"REV":missCONT?"CONT":recentREV and (not recentCONT or lastBearREVContextBar>=lastBearCONTContextBar)?"REV":recentCONT?"CONT":"NONE"
     if kind!="RAW"
         bearRxEngine:=p.sourceEngine
