@@ -1018,12 +1018,6 @@ var int contSignalCount=0
 var int signalRejectedQuality=0
 var int signalRejectedDuplicate=0
 var int signalRejectedConflict=0
-var int lastBullSignalBar=na
-var int lastBearSignalBar=na
-var int lastBullSignalPriority=0
-var int lastBearSignalPriority=0
-var string lastBullSignalSource="NONE"
-var string lastBearSignalSource="NONE"
 var string lastSignalText="NONE"
 
 // Only accepted managed plans occupy duplicate/cooldown capacity.
@@ -1075,6 +1069,8 @@ f_noteNormalUpgrade(int dir,string family,int epId,string engine,int poiId) =>
         if not array.includes(normalUpgradeKeys,key)
             recorded:=true
             array.push(normalUpgradeKeys,key)
+            if array.size(normalUpgradeKeys)>120
+                array.shift(normalUpgradeKeys)
             if showNormalUpgradeMarkers
                 string msg="NORMAL CONFIRMED · "+family+" "+(dir==1?"BUY":"SELL")+" · "+engine+"#"+str.tostring(poiId)+"\nUPGRADE ONLY · NO NEW PLAN"
                 label lb=label.new(bar_index,dir==1?low:high,msg,style=label.style_none,textcolor=dir==1?bullSignalColor:bearSignalColor,size=size.tiny)
@@ -2962,9 +2958,6 @@ if bullREVEligibleEvent and enableREVSignals
         bullREVSignal:=true
         bullSignalCount+=1
         revSignalCount+=1
-        lastBullSignalBar:=bar_index
-        lastBullSignalPriority:=3
-        lastBullSignalSource:="NORMAL"
         lastSignalText:="REV BULL · Q"+str.tostring(bullREVLastScore)+" "+bullREVLastGrade+" · EP"+str.tostring(bullREVEpisodeId)+" · POI"+str.tostring(bullREVPOIId)
         array.push(signalHistory,SignalRecord.new("REV",1,bullREVEpisodeId,bullREVPOIEngine,bullREVPOIId,bar_index,bullREVLastScore,"NORMAL",3))
         label sigLb=f_signalEntryMarker(1,"REV",bullREVLastScore,bullREVLastGrade)
@@ -2984,9 +2977,6 @@ if bearREVEligibleEvent and enableREVSignals
         bearREVSignal:=true
         bearSignalCount+=1
         revSignalCount+=1
-        lastBearSignalBar:=bar_index
-        lastBearSignalPriority:=3
-        lastBearSignalSource:="NORMAL"
         lastSignalText:="REV BEAR · Q"+str.tostring(bearREVLastScore)+" "+bearREVLastGrade+" · EP"+str.tostring(bearREVEpisodeId)+" · POI"+str.tostring(bearREVPOIId)
         array.push(signalHistory,SignalRecord.new("REV",-1,bearREVEpisodeId,bearREVPOIEngine,bearREVPOIId,bar_index,bearREVLastScore,"NORMAL",3))
         label sigLb=f_signalEntryMarker(-1,"REV",bearREVLastScore,bearREVLastGrade)
@@ -3006,9 +2996,6 @@ if bullCONTEligibleEvent and enableCONTSignals
         bullCONTSignal:=true
         bullSignalCount+=1
         contSignalCount+=1
-        lastBullSignalBar:=bar_index
-        lastBullSignalPriority:=3
-        lastBullSignalSource:="NORMAL"
         lastSignalText:="CONT BULL · Q"+str.tostring(bullCONTLastScore)+" "+bullCONTLastGrade+" · EP"+str.tostring(bullCONTEpisodeId)+" · POI"+str.tostring(bullCONTPOIId)
         array.push(signalHistory,SignalRecord.new("CONT",1,bullCONTEpisodeId,bullCONTPOIEngine,bullCONTPOIId,bar_index,bullCONTLastScore,"NORMAL",3))
         label sigLb=f_signalEntryMarker(1,"CONT",bullCONTLastScore,bullCONTLastGrade)
@@ -3028,9 +3015,6 @@ if bearCONTEligibleEvent and enableCONTSignals
         bearCONTSignal:=true
         bearSignalCount+=1
         contSignalCount+=1
-        lastBearSignalBar:=bar_index
-        lastBearSignalPriority:=3
-        lastBearSignalSource:="NORMAL"
         lastSignalText:="CONT BEAR · Q"+str.tostring(bearCONTLastScore)+" "+bearCONTLastGrade+" · EP"+str.tostring(bearCONTEpisodeId)+" · POI"+str.tostring(bearCONTPOIId)
         array.push(signalHistory,SignalRecord.new("CONT",-1,bearCONTEpisodeId,bearCONTPOIEngine,bearCONTPOIId,bar_index,bearCONTLastScore,"NORMAL",3))
         label sigLb=f_signalEntryMarker(-1,"CONT",bearCONTLastScore,bearCONTLastGrade)
@@ -3074,11 +3058,6 @@ var int lastBullCONTContextBar=na
 var int lastBearCONTContextBar=na
 var int lastBullREVContextBar=na
 var int lastBearREVContextBar=na
-var int lastStructuralResetBar=na
-var int lastBullEarlySignalBar=na
-var int lastBearEarlySignalBar=na
-var int lastBullEarlyEpisodeId=na
-var int lastBearEarlyEpisodeId=na
 var string lastBullREVScope="INTERNAL"
 var string lastBearREVScope="INTERNAL"
 var string lastBullREVKind="CHoCH"
@@ -3112,12 +3091,10 @@ if bearDisplacementEvent or iBearBOS or xBearBOS
     lastBearCONTScope:=xBearBOS?"EXTERNAL":"INTERNAL"
 
 if iBullCH or xBullCH or iBullMSS or xBullMSS
-    lastStructuralResetBar:=bar_index
     lastBullREVContextBar:=bar_index
     lastBullREVScope:=(xBullMSS or xBullCH)?"EXTERNAL":"INTERNAL"
     lastBullREVKind:=xBullMSS?"MSS":xBullCH?"CHoCH":iBullMSS?"MSS":"CHoCH"
 if iBearCH or xBearCH or iBearMSS or xBearMSS
-    lastStructuralResetBar:=bar_index
     lastBearREVContextBar:=bar_index
     lastBearREVScope:=(xBearMSS or xBearCH)?"EXTERNAL":"INTERNAL"
     lastBearREVKind:=xBearMSS?"MSS":xBearCH?"CHoCH":iBearMSS?"MSS":"CHoCH"
@@ -3329,12 +3306,6 @@ if not na(bearRxPOIId)
 if reactionSignalEvent
     if reactionDir==1
         bullSignalCount+=1
-        lastBullSignalBar:=bar_index
-        lastBullSignalPriority:=reactionKind=="MISS"?2:1
-        lastBullSignalSource:=reactionKind
-        if reactionKind=="EARLY"
-            lastBullEarlySignalBar:=bar_index
-            lastBullEarlyEpisodeId:=reactionEpisodeId
         if reactionFamily=="REV"
             bullREVSignal:=true
             bullREVLastScore:=reactionScore
@@ -3347,12 +3318,6 @@ if reactionSignalEvent
             contSignalCount+=1
     else
         bearSignalCount+=1
-        lastBearSignalBar:=bar_index
-        lastBearSignalPriority:=reactionKind=="MISS"?2:1
-        lastBearSignalSource:=reactionKind
-        if reactionKind=="EARLY"
-            lastBearEarlySignalBar:=bar_index
-            lastBearEarlyEpisodeId:=reactionEpisodeId
         if reactionFamily=="REV"
             bearREVSignal:=true
             bearREVLastScore:=reactionScore
@@ -3468,36 +3433,6 @@ if hasCurrentSignal
         int chosenPOI=f_findUnifiedPOIByKey(selectedPOIEngine,selectedPOIId)
         reactionPOIType:=chosenPOI>=0?array.get(unifiedPOIs,chosenPOI).poiType:"NONE"
         reactionSweepPrice:=selectedSource=="MISS" and selectedFamily=="REV"?(selectedDirection==1?bullREVSweepPrice:bearREVSweepPrice):na
-
-    // Rebuild same-direction conflict state and EARLY suppression from retained history.
-    lastBullSignalBar:=na
-    lastBearSignalBar:=na
-    lastBullSignalPriority:=0
-    lastBearSignalPriority:=0
-    lastBullSignalSource:="NONE"
-    lastBearSignalSource:="NONE"
-    lastBullEarlySignalBar:=na
-    lastBearEarlySignalBar:=na
-    lastBullEarlyEpisodeId:=na
-    lastBearEarlyEpisodeId:=na
-
-    if array.size(signalHistory)>0
-        for n=0 to array.size(signalHistory)-1
-            SignalRecord sr=array.get(signalHistory,n)
-            if sr.direction==1 and (na(lastBullSignalBar) or sr.bar>=lastBullSignalBar)
-                lastBullSignalBar:=sr.bar
-                lastBullSignalPriority:=sr.priority
-                lastBullSignalSource:=sr.source
-            if sr.direction==-1 and (na(lastBearSignalBar) or sr.bar>=lastBearSignalBar)
-                lastBearSignalBar:=sr.bar
-                lastBearSignalPriority:=sr.priority
-                lastBearSignalSource:=sr.source
-            if sr.direction==1 and sr.source=="EARLY" and (na(lastBullEarlySignalBar) or sr.bar>=lastBullEarlySignalBar)
-                lastBullEarlySignalBar:=sr.bar
-                lastBullEarlyEpisodeId:=sr.episodeId
-            if sr.direction==-1 and sr.source=="EARLY" and (na(lastBearEarlySignalBar) or sr.bar>=lastBearEarlySignalBar)
-                lastBearEarlySignalBar:=sr.bar
-                lastBearEarlyEpisodeId:=sr.episodeId
 
     if selectedSignalValid
         lastSignalText:=selectedFamily+" "+(selectedDirection==1?"BULL":"BEAR")+" · "+selectedSource+" · Q"+str.tostring(selectedScore)+" · EP"+str.tostring(selectedEpisodeId)+" · POI"+str.tostring(selectedPOIId)
@@ -4054,14 +3989,6 @@ if anySignal
         string rejectionReason=pidx<0?"NO ACTIVE POI":not stopSideAccepted?"STOP WRONG SIDE":not stopDistanceAccepted?"STOP "+str.tostring(riskDistance/atr,"#.##")+" > "+str.tostring(maxStopDistanceATR,"#.##")+" ATR":"TARGET RR LIMITS"
         lastPlanText:="RISK FILTER · "+rejectionReason
         lastSignalText:="RISK FILTER · "+rejectionReason
-        // A rejected EARLY attempt must not lock the early reentry state.
-        if signalSource=="EARLY"
-            if dir==1 and lastBullEarlySignalBar==bar_index
-                lastBullEarlySignalBar:=na
-                lastBullEarlyEpisodeId:=na
-            if dir==-1 and lastBearEarlySignalBar==bar_index
-                lastBearEarlySignalBar:=na
-                lastBearEarlyEpisodeId:=na
         if not na(planSignalMarker)
             string rejKey=f_acceptedSignalKey(dir,family,epId,poiEngine,poiId)+"|"+signalSource
             bool firstRejection=not array.includes(riskRejectedKeys,rejKey)
