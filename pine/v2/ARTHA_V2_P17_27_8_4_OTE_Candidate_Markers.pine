@@ -3542,7 +3542,7 @@ f_oteStudyMark(OTEShadowRange range,string tag,string model) =>
         color ink=range.dir==1?oteAutoFibBull:oteAutoFibBear
         string side=range.dir==1?"BUY":"SELL"
         string suffix=model=="Aggressive"?"A":model=="Balanced"?"B":"C"
-        string desc="OTE "+suffix+" · "+side+" · "+tag+" · "+range.matchedPOIType+"\\nStudy @ "+str.tostring(close,format.mintick)
+        string desc="OTE "+suffix+" · "+side+" · "+tag+" · "+range.matchedPOIType+"\nStudy @ "+str.tostring(close,format.mintick)
         label lb=label.new(bar_index,range.dir==1?low:high,desc,xloc=xloc.bar_index,style=range.dir==1?label.style_label_up:label.style_label_down,color=color.new(ink,12),textcolor=color.white,size=size.tiny)
         array.push(oteStudyEntryLabels,lb)
         if array.size(oteStudyEntryLabels)>oteCandidateMarkerCap
