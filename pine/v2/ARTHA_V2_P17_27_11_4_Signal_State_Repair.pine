@@ -2938,7 +2938,7 @@ if bullREVEligibleEvent and enableREVSignals
         array.push(signalHistory,SignalRecord.new("REV",1,bullREVEpisodeId,bullREVPOIEngine,bullREVPOIId,bar_index,bullREVLastScore,"NORMAL",3))
         label sigLb=f_signalEntryMarker(1,"REV",bullREVLastScore,bullREVLastGrade)
         if not na(sigLb)
-            label.set_text(sigLb,label.get_text(sigLb)+" · NORMAL · POI"+str.tostring(bullREVPOIId))
+            label.set_text(sigLb,label.get_text(sigLb)+" · NORMAL · "+bullREVPOIEngine+" · POI"+str.tostring(bullREVPOIId))
             array.push(signalLabels,sigLb)
 
 if bearREVEligibleEvent and enableREVSignals
@@ -2959,7 +2959,7 @@ if bearREVEligibleEvent and enableREVSignals
         array.push(signalHistory,SignalRecord.new("REV",-1,bearREVEpisodeId,bearREVPOIEngine,bearREVPOIId,bar_index,bearREVLastScore,"NORMAL",3))
         label sigLb=f_signalEntryMarker(-1,"REV",bearREVLastScore,bearREVLastGrade)
         if not na(sigLb)
-            label.set_text(sigLb,label.get_text(sigLb)+" · NORMAL · POI"+str.tostring(bearREVPOIId))
+            label.set_text(sigLb,label.get_text(sigLb)+" · NORMAL · "+bearREVPOIEngine+" · POI"+str.tostring(bearREVPOIId))
             array.push(signalLabels,sigLb)
 
 if bullCONTEligibleEvent and enableCONTSignals
@@ -2980,7 +2980,7 @@ if bullCONTEligibleEvent and enableCONTSignals
         array.push(signalHistory,SignalRecord.new("CONT",1,bullCONTEpisodeId,bullCONTPOIEngine,bullCONTPOIId,bar_index,bullCONTLastScore,"NORMAL",3))
         label sigLb=f_signalEntryMarker(1,"CONT",bullCONTLastScore,bullCONTLastGrade)
         if not na(sigLb)
-            label.set_text(sigLb,label.get_text(sigLb)+" · NORMAL · POI"+str.tostring(bullCONTPOIId))
+            label.set_text(sigLb,label.get_text(sigLb)+" · NORMAL · "+bullCONTPOIEngine+" · POI"+str.tostring(bullCONTPOIId))
             array.push(signalLabels,sigLb)
 
 if bearCONTEligibleEvent and enableCONTSignals
@@ -3001,7 +3001,7 @@ if bearCONTEligibleEvent and enableCONTSignals
         array.push(signalHistory,SignalRecord.new("CONT",-1,bearCONTEpisodeId,bearCONTPOIEngine,bearCONTPOIId,bar_index,bearCONTLastScore,"NORMAL",3))
         label sigLb=f_signalEntryMarker(-1,"CONT",bearCONTLastScore,bearCONTLastGrade)
         if not na(sigLb)
-            label.set_text(sigLb,label.get_text(sigLb)+" · NORMAL · POI"+str.tostring(bearCONTPOIId))
+            label.set_text(sigLb,label.get_text(sigLb)+" · NORMAL · "+bearCONTPOIEngine+" · POI"+str.tostring(bearCONTPOIId))
             array.push(signalLabels,sigLb)
 
 while array.size(signalHistory)>120
@@ -3336,7 +3336,7 @@ if reactionSignalEvent
     label rxLb=f_signalEntryMarker(reactionDir,reactionFamily,reactionScore,reactionGrade)
     if not na(rxLb)
         string detail=reactionKind=="EARLY" and not na(reactionTouchPct)?" "+reactionPOIType+" "+str.tostring(math.min(100.0,reactionTouchPct),"#")+"% "+reactionTouchBasis:""
-        label.set_text(rxLb,label.get_text(rxLb)+" · "+reactionKind+detail+" · POI"+str.tostring(reactionPOIId))
+        label.set_text(rxLb,label.get_text(rxLb)+" · "+reactionKind+detail+" · "+reactionPOIEngine+" · POI"+str.tostring(reactionPOIId))
         array.push(signalLabels,rxLb)
 
 //=============================================================================
@@ -3408,7 +3408,7 @@ if hasCurrentSignal
                 string candidateText=label.get_text(candidate)
                 int candidateDirection=(str.startswith(candidateText,"▲ ") or str.startswith(candidateText,"BUY "))?1:(str.startswith(candidateText,"▼ ") or str.startswith(candidateText,"SELL "))?-1:0
                 string candidateFamily=(str.startswith(candidateText,"▲ R") or str.startswith(candidateText,"BUY REV"))?"REV":(str.startswith(candidateText,"▲ C") or str.startswith(candidateText,"BUY CONT") or str.startswith(candidateText,"▼ C") or str.startswith(candidateText,"SELL CONT"))?"CONT":(str.startswith(candidateText,"▼ R") or str.startswith(candidateText,"SELL REV"))?"REV":"NONE"
-                bool keepMarker=selectedSignalValid and candidateDirection==selectedDirection and candidateFamily==selectedFamily and str.contains(candidateText," · "+selectedSource) and str.contains(candidateText," · POI"+str.tostring(selectedPOIId))
+                bool keepMarker=selectedSignalValid and candidateDirection==selectedDirection and candidateFamily==selectedFamily and str.contains(candidateText," · "+selectedSource) and str.contains(candidateText," · "+selectedPOIEngine+" · POI"+str.tostring(selectedPOIId))
                 if not keepMarker
                     label.delete(candidate)
                     array.remove(signalLabels,n)
@@ -3830,7 +3830,7 @@ if anySignal
             label candidate=array.get(signalLabels,n)
             if not na(candidate)
                 string candidateText=label.get_text(candidate)
-                bool matchingText=(str.startswith(candidateText,compactExpected) or str.startswith(candidateText,verbosePrefix)) and str.contains(candidateText," · "+selectedSource) and str.contains(candidateText," · POI"+str.tostring(selectedPOIId))
+                bool matchingText=(str.startswith(candidateText,compactExpected) or str.startswith(candidateText,verbosePrefix)) and str.contains(candidateText," · "+selectedSource) and str.contains(candidateText," · "+selectedPOIEngine+" · POI"+str.tostring(selectedPOIId))
                 if label.get_x(candidate)==bar_index and matchingText
                     planSignalMarker:=candidate
                     break
@@ -4022,7 +4022,7 @@ if anySignal
                 lastBearEarlyEpisodeId:=na
         if not na(planSignalMarker)
             if showRejectedSignalMarkers
-                label.set_text(planSignalMarker,"× "+family+" "+(dir==1?"BUY":"SELL")+" · "+signalSource+" · POI"+str.tostring(poiId)+"\nREJECTED · "+rejectionReason)
+                label.set_text(planSignalMarker,"× "+family+" "+(dir==1?"BUY":"SELL")+" · "+signalSource+" · "+poiEngine+" · POI"+str.tostring(poiId)+"\nREJECTED · "+rejectionReason)
                 label.set_color(planSignalMarker,color.new(color.gray,30))
                 label.set_textcolor(planSignalMarker,color.white)
             else
