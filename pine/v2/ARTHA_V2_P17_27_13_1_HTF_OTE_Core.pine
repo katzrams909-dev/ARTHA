@@ -366,8 +366,6 @@ bool oteAutoFibZone=input.bool(true,"Shade 62–79% OTE zone",group=G143)
 color oteAutoFibBull=input.color(color.rgb(0,188,212),"Bullish Auto Fib color",group=G143)
 color oteAutoFibBear=input.color(color.rgb(156,39,176),"Bearish Auto Fib color",group=G143)
 
-string G15="15 Performance Attribution"
-
 //=============================================================================
 // ACTIVE CALIBRATION
 //=============================================================================
@@ -3456,7 +3454,6 @@ f_storeAutoFibRange(array<OTEShadowRange> dest,int direction,int originBar,float
         float bottom=math.min(v62,v79)
         bool priorInvalid=false
         bool priorTouch=false
-        int priorTouchBar=na
         if pivotAge>0
             for k=0 to pivotAge-1
                 bool breached=direction==1?(oteFibInvalidation=="Wick"?low[k]<origin:close[k]<origin):(oteFibInvalidation=="Wick"?high[k]>origin:close[k]>origin)
@@ -3464,7 +3461,6 @@ f_storeAutoFibRange(array<OTEShadowRange> dest,int direction,int originBar,float
                     priorInvalid:=true
                 if low[k]<=top and high[k]>=bottom
                     priorTouch:=true
-                    priorTouchBar:=na(priorTouchBar)?bar_index-k:math.min(priorTouchBar,bar_index-k)
         if not priorInvalid
             OTEShadowRange created=OTEShadowRange.new(direction,originBar,bar_index,origin,extreme,top,bottom,extreme-direction*span*0.705,false,priorTouch,false)
             array.push(dest,created)
