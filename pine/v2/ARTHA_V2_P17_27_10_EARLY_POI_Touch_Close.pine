@@ -3030,6 +3030,8 @@ string reactionPOIType="NONE"
 int reactionScore=na
 string reactionGrade="—"
 float reactionSweepPrice=na
+float reactionTouchPct=na
+string reactionTouchBasis="NONE"
 
 if bullDisplacementEvent or iBullBOS or xBullBOS
     lastBullCONTContextBar:=bar_index
@@ -3193,6 +3195,11 @@ if not na(bullRxPOIId)
             reactionScore:=score
             reactionGrade:=f_qualityGrade(score)
             reactionSweepPrice:=isMiss and bullRxFamily=="REV"?bullREVSweepPrice:na
+            if not isMiss
+                float bodyDepth=f_earlyPenetrationPct(1,p.top,p.bottom,true)
+                float wickDepth=f_earlyPenetrationPct(1,p.top,p.bottom,false)
+                reactionTouchPct:=earlyPenetrationBasis=="Body only"?bodyDepth:wickDepth
+                reactionTouchBasis:=earlyPenetrationBasis=="Body only"?"BODY":earlyPenetrationBasis=="Wick only"?"WICK":bodyDepth>=25.0?"BODY":"WICK"
         bullRxPOIId:=na
         bullRxKind:="NONE"
     else if not stillValid or bar_index>bullRxDeadline
@@ -3234,6 +3241,11 @@ if not na(bearRxPOIId)
             reactionScore:=score
             reactionGrade:=f_qualityGrade(score)
             reactionSweepPrice:=isMiss and bearRxFamily=="REV"?bearREVSweepPrice:na
+            if not isMiss
+                float bodyDepth=f_earlyPenetrationPct(-1,p.top,p.bottom,true)
+                float wickDepth=f_earlyPenetrationPct(-1,p.top,p.bottom,false)
+                reactionTouchPct:=earlyPenetrationBasis=="Body only"?bodyDepth:wickDepth
+                reactionTouchBasis:=earlyPenetrationBasis=="Body only"?"BODY":earlyPenetrationBasis=="Wick only"?"WICK":bodyDepth>=25.0?"BODY":"WICK"
         bearRxPOIId:=na
         bearRxKind:="NONE"
     else if not stillValid or bar_index>bearRxDeadline
@@ -3278,9 +3290,13 @@ if reactionSignalEvent
             bearCONTLastGrade:=reactionGrade
             contSignalCount+=1
     lastSignalText:=(reactionFamily=="REV"?"REV ":"CONT ")+(reactionDir==1?"BULL":"BEAR")+" · "+reactionKind+" · Q"+str.tostring(reactionScore)+" "+reactionGrade
+    if reactionKind=="EARLY" and not na(reactionTouchPct)
+        lastSignalText+=" · POI "+str.tostring(math.min(100.0,reactionTouchPct),"#")+"% "+reactionTouchBasis
     array.push(signalHistory,SignalRecord.new(reactionFamily,reactionDir,reactionEpisodeId,reactionPOIEngine,reactionPOIId,bar_index,reactionScore,reactionKind,reactionKind=="MISS"?2:1))
     label rxLb=f_signalEntryMarker(reactionDir,reactionFamily,reactionScore,reactionGrade)
     if not na(rxLb)
+        if reactionKind=="EARLY" and not na(reactionTouchPct)
+            label.set_text(rxLb,label.get_text(rxLb)+" · EARLY "+reactionPOIType+" "+str.tostring(math.min(100.0,reactionTouchPct),"#")+"% "+reactionTouchBasis)
         array.push(signalLabels,rxLb)
 
 //=============================================================================
