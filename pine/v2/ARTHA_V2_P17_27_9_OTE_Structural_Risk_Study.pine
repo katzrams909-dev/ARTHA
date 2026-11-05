@@ -3542,13 +3542,13 @@ f_oteShowCandidateSource(string tag) =>
 // an OTE lacks a REV/CONT family assignment, so CONT-style protected-swing
 // geometry is explicitly provisional, never passed into riskPlans.
 f_oteStudyRisk(OTEShadowRange candidate) =>
-    string result="\\nRisk: NO POI"
+    string result="\nRisk: NO POI"
     int poiIdx=f_otePOIIndex(candidate.dir,candidate.bandTop,candidate.bandBottom)
     if poiIdx>=0
         UnifiedPOI poi=array.get(unifiedPOIs,poiIdx)
-        float protected=candidate.dir==1?xProtectedLow:xProtectedHigh
+        float protectedLevel=candidate.dir==1?xProtectedLow:xProtectedHigh
         float entry=close
-        float sl=f_planStop("CONT",candidate.dir,entry,poi.top,poi.bottom,na,protected)
+        float sl=f_planStop("CONT",candidate.dir,entry,poi.top,poi.bottom,na,protectedLevel)
         float risk=math.abs(entry-sl)
         float minSep=math.max(atr*minTargetSeparationATR,syminfo.mintick)
         float maxT1R=risk>0?maxLiquidityTargetR-minSep/risk:na
@@ -3556,7 +3556,7 @@ f_oteStudyRisk(OTEShadowRange candidate) =>
         bool validDist=not na(atr) and atr>0 and risk<=atr*maxStopDistanceATR
         bool validTargets=primaryTargetMode=="Fixed R"?fixedTarget2R>fixedTarget1R:not na(maxT1R) and maxT1R>=minTarget1R and maxLiquidityTargetR>=minTarget2R
         bool valid=validStop and validDist and validTargets
-        result="\\nSL "+str.tostring(sl,format.mintick)+" · "+str.tostring(risk/math.max(atr,syminfo.mintick),"#.##")+" ATR"
+        result="\nSL "+str.tostring(sl,format.mintick)+" · "+str.tostring(risk/math.max(atr,syminfo.mintick),"#.##")+" ATR"
         if valid
             float fallback1R=math.min(math.max(fallbackTarget1R,minTarget1R),maxT1R)
             float fallback1=entry+candidate.dir*risk*fallback1R
@@ -3569,11 +3569,11 @@ f_oteStudyRisk(OTEShadowRange candidate) =>
             float tp2=primaryTargetMode=="Fixed R"?entry+candidate.dir*risk*fixedTarget2R:not na(liq2)?liq2:fallback2
             float tp3=f_mtfExtraTarget(candidate.dir,tp2,minSep,f_visualLiquidityBeyond(candidate.dir,tp2,minSep))
             float tp4=not na(tp3)?f_mtfExtraTarget(candidate.dir,tp3,minSep,f_visualLiquidityBeyond(candidate.dir,tp3,minSep)):na
-            result+="\\nT1 "+str.tostring(tp1,format.mintick)+" · T2 "+str.tostring(tp2,format.mintick)
-            result+="\\nT3 "+(na(tp3)?"—":str.tostring(tp3,format.mintick))+" · T4 "+(na(tp4)?"—":str.tostring(tp4,format.mintick))
-            result+="\\nR1 "+str.tostring(math.abs(tp1-entry)/risk,"#.##")+" · R2 "+str.tostring(math.abs(tp2-entry)/risk,"#.##")+" · STUDY"
+            result+="\nT1 "+str.tostring(tp1,format.mintick)+" · T2 "+str.tostring(tp2,format.mintick)
+            result+="\nT3 "+(na(tp3)?"—":str.tostring(tp3,format.mintick))+" · T4 "+(na(tp4)?"—":str.tostring(tp4,format.mintick))
+            result+="\nR1 "+str.tostring(math.abs(tp1-entry)/risk,"#.##")+" · R2 "+str.tostring(math.abs(tp2-entry)/risk,"#.##")+" · STUDY"
         else
-            result+="\\nRISK REJECTED"
+            result+="\nRISK REJECTED"
     result
 
 f_oteStudyMark(OTEShadowRange candidate,string tag,string model) =>
