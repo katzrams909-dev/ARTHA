@@ -3548,7 +3548,7 @@ f_maintainFibArchive(array<OTEShadowRange> book) =>
                         t.touchBar:=bar_index
                     bool exceedsZero=t.dir==1?(oteFibZeroExtension=="Wick"?high>t.extreme:close>t.extreme):(oteFibZeroExtension=="Wick"?low<t.extreme:close<t.extreme)
                     if oteFibExtendPreTouch and not t.touched and exceedsZero
-                        // First-touch priority; update only after a confirmed 0% close breakout.
+                        // First-touch priority; recalculate on confirmed candle using selected wick/close extension.
                         t.extreme:=t.dir==1?high:low
                         float span=math.abs(t.extreme-t.origin)
                         float p62=t.extreme-t.dir*span*0.62
