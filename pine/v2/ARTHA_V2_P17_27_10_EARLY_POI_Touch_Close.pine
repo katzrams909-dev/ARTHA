@@ -3199,7 +3199,7 @@ if not na(bullRxPOIId)
                 float bodyDepth=f_earlyPenetrationPct(1,p.top,p.bottom,true)
                 float wickDepth=f_earlyPenetrationPct(1,p.top,p.bottom,false)
                 reactionTouchPct:=earlyPenetrationBasis=="Body only"?bodyDepth:wickDepth
-                reactionTouchBasis:=earlyPenetrationBasis=="Body only"?"BODY":earlyPenetrationBasis=="Wick only"?"WICK":bodyDepth>=25.0?"BODY":"WICK"
+                reactionTouchBasis:=earlyPenetrationBasis=="Body only"?"BODY":earlyPenetrationBasis=="Wick only"?"WICK":bodyDepth>=(earlyPOIFill=="15%"?15.0:earlyPOIFill=="25%"?25.0:earlyPOIFill=="50%"?50.0:earlyPOIFill=="75%"?75.0:100.0)?"BODY":"WICK"
         bullRxPOIId:=na
         bullRxKind:="NONE"
     else if not stillValid or bar_index>bullRxDeadline
@@ -3245,7 +3245,7 @@ if not na(bearRxPOIId)
                 float bodyDepth=f_earlyPenetrationPct(-1,p.top,p.bottom,true)
                 float wickDepth=f_earlyPenetrationPct(-1,p.top,p.bottom,false)
                 reactionTouchPct:=earlyPenetrationBasis=="Body only"?bodyDepth:wickDepth
-                reactionTouchBasis:=earlyPenetrationBasis=="Body only"?"BODY":earlyPenetrationBasis=="Wick only"?"WICK":bodyDepth>=25.0?"BODY":"WICK"
+                reactionTouchBasis:=earlyPenetrationBasis=="Body only"?"BODY":earlyPenetrationBasis=="Wick only"?"WICK":bodyDepth>=(earlyPOIFill=="15%"?15.0:earlyPOIFill=="25%"?25.0:earlyPOIFill=="50%"?50.0:earlyPOIFill=="75%"?75.0:100.0)?"BODY":"WICK"
         bearRxPOIId:=na
         bearRxKind:="NONE"
     else if not stillValid or bar_index>bearRxDeadline
