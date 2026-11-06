@@ -3862,10 +3862,8 @@ if anySignal
         nextRiskPlanId+=1
         riskPlanCount+=1
         string acceptedKey=f_acceptedSignalKey(dir,family,epId,poiEngine,poiId)
-        if oteMatch!="NONE"
-            lastPlanText:="OTE "+oteMatch+" · "+family+" "+signalSource
-            if not na(planSignalMarker)
-                label.set_text(planSignalMarker,label.get_text(planSignalMarker)+" · OTE "+oteMatch)
+        if oteMatch!="NONE" and not na(planSignalMarker)
+            label.set_text(planSignalMarker,label.get_text(planSignalMarker)+" · OTE "+oteMatch)
         array.push(acceptedSignalKeys,acceptedKey)
         array.push(acceptedSignalBars,bar_index)
         array.push(acceptedSignalPriorities,signalSource=="NORMAL"?3:signalSource=="MISS"?2:1)
@@ -3881,7 +3879,7 @@ if anySignal
         lastPlanT2:=target2
         lastPlanRR1:=rr1
         lastPlanRR2:=rr2
-        lastPlanText:=family+" "+(dir==1?"BUY":"SELL")+" · T1 "+t1Source+" · T2 "+t2Source
+        lastPlanText:=family+" "+(dir==1?"BUY":"SELL")+" · T1 "+t1Source+" · T2 "+t2Source+(oteMatch=="NONE"?"":" · OTE "+oteMatch)
     else
         string rejectionReason=pidx<0?"NO ACTIVE POI":not stopSideAccepted?"STOP WRONG SIDE":not stopDistanceAccepted?"STOP "+str.tostring(riskDistance/atr,"#.##")+" > "+str.tostring(maxStopDistanceATR,"#.##")+" ATR":not targetGeometryAccepted?"TARGET RR LIMITS":"OTE NO CONFLUENCE"
         lastPlanText:="RISK FILTER · "+rejectionReason
