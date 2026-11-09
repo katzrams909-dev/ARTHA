@@ -3668,7 +3668,8 @@ if showMidpointAudit and barstate.isconfirmed and array.size(unifiedPOIs)>0
     for i=0 to array.size(unifiedPOIs)-1
         UnifiedPOI q=array.get(unifiedPOIs,i)
         string k=q.sourceEngine+"#"+str.tostring(q.sourceId)+"/"+str.tostring(q.direction)
-        bool reclaim=q.bornBar<bar_index and f_normalFill(q.direction,q.top,q.bottom) and f_normalReclaim(q.direction,q.top,q.bottom)
+        bool depth=q.direction==1?low<=(q.top+q.bottom)*0.5:high>=(q.top+q.bottom)*0.5
+        bool reclaim=q.bornBar<bar_index and high>=q.bottom and low<=q.top and depth and f_normalReclaim(q.direction,q.top,q.bottom)
         if reclaim and not array.includes(midpointAuditKeys,k)
             string oteTag=f_oteProductionSource(q.direction,q.top,q.bottom)
             string msg="POI 50% · "+q.poiType+"#"+str.tostring(q.sourceId)+(oteTag=="NONE"?"":" · OTE "+oteTag)
