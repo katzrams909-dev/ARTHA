@@ -5,8 +5,8 @@ User confirmed P17.27.14.4 **compiles** in TradingView. The screenshots with ora
 
 ## New functionality (study-only; no trade admission change)
 - The new `Show 50% POI reclaim audit` option is rendered in Section 14 as `Audit confirmed POI 50% reclaim (not an entry)`, default ON.
-- On a **confirmed chart candle**, scan **current native unified POIs only**. POI must have been born on an earlier bar (`p.bornBar<bar_index`). Existing `f_normalFill` and `f_normalReclaim` must both be true.
-- This observes a >= configured NORMAL POI penetration (default 50% by candle wick), followed by a directionally appropriate close outside the POI's entry-facing edge on the **same confirmed candle**. It does **not** infer earlier unobserved retests or create signals retroactively.
+- On a **confirmed chart candle**, scan **current native unified POIs only**. POI must have been born on an earlier bar (`p.bornBar<bar_index`). A wick must reach the POI's geometric 50% midpoint, and the same confirmed candle must directionally close back outside the entry-facing POI edge. The geometric 50% threshold is independent of the configurable NORMAL penetration requirement.
+- This observes a >= 50% POI penetration by candle wick, followed by a directionally appropriate close outside the POI's entry-facing edge on the **same confirmed candle**. It does **not** infer earlier unobserved retests or create signals retroactively.
 - Up to **one** new orange `POI 50% · TYPE#ID` audit label per bar, and at most one per native POI key while tracked. Keeps up to 25 audit labels and 120 dedup keys.
 - Adds `M` counter to the SIGNAL FLOW diagnostic row, counting audit detections. A qualifying confirmed OTE source is included in the marker when available.
 - **No execution, alerts, signal score, risk-plan creation, trade statistics changes, or relaxed protective gates.** Existing NORMAL, EARLY, MISS and OTE confluence flows are unchanged. The audit intentionally does not claim every marker is executable or a fully validated SMC/ICT setup.
