@@ -3394,8 +3394,6 @@ type OTEShadowRange
     bool qualifiedTouch
     int firstTouchBar
     int lastConfluenceBar
-    string lastConfluenceEngine
-    int lastConfluenceId
 
 // Visual anchors are independent of 35-bar OTE observation expiry.
 // Only confirmed, directionally ordered pivots/break ranges are archived.
@@ -3432,7 +3430,7 @@ f_updateOTEShadow() =>
                 float bottom=math.min(a,b)
                 float mid=extreme-newDir*span*0.705
                 bool overlap=f_otePOIIndex(newDir,top,bottom)>=0
-                OTEShadowRange created=OTEShadowRange.new(newDir,bar_index,bar_index,origin,extreme,top,bottom,mid,overlap,false,false,na,na,"NONE",na)
+                OTEShadowRange created=OTEShadowRange.new(newDir,bar_index,bar_index,origin,extreme,top,bottom,mid,overlap,false,false,na,na)
                 array.push(oteFibBreakArchive,created.copy())
                 if array.size(oteFibBreakArchive)>15
                     array.shift(oteFibBreakArchive)
@@ -3469,7 +3467,7 @@ f_storeAutoFibRange(array<OTEShadowRange> dest,int direction,int originBar,float
                 if low[k]<=top and high[k]>=bottom
                     priorTouch:=true
         if not priorInvalid
-            OTEShadowRange created=OTEShadowRange.new(direction,originBar,bar_index,origin,extreme,top,bottom,extreme-direction*span*0.705,false,priorTouch,false,na,na,"NONE",na)
+            OTEShadowRange created=OTEShadowRange.new(direction,originBar,bar_index,origin,extreme,top,bottom,extreme-direction*span*0.705,false,priorTouch,false,na,na)
             array.push(dest,created)
             if array.size(dest)>15
                 array.shift(dest)
@@ -3537,7 +3535,7 @@ f_archiveHTFOTE() =>
                 float bottom=math.min(a,b)
                 bool priorTouch=up?oteHTFPostLow<=top:oteHTFPostHigh>=bottom
                 // Start at the *chart confirmation bar*. Never backplot at the pivot.
-                OTEShadowRange fib=OTEShadowRange.new(dir,bar_index,bar_index,origin,extreme,top,bottom,extreme-dir*span*0.705,false,priorTouch,false,na,na,"NONE",na)
+                OTEShadowRange fib=OTEShadowRange.new(dir,bar_index,bar_index,origin,extreme,top,bottom,extreme-dir*span*0.705,false,priorTouch,false,na,na)
                 array.push(oteFibHTFArchive,fib)
                 if array.size(oteFibHTFArchive)>15
                     array.shift(oteFibHTFArchive)
@@ -3565,10 +3563,7 @@ f_maintainFibArchive(array<OTEShadowRange> book) =>
                         t.touched:=true
                         t.firstTouchBar:=bar_index
                     if firstTouch and matched>=0
-                        UnifiedPOI overlapPOI=array.get(unifiedPOIs,matched)
                         t.lastConfluenceBar:=bar_index
-                        t.lastConfluenceEngine:=overlapPOI.sourceEngine
-                        t.lastConfluenceId:=overlapPOI.sourceId
                     bool exceedsZero=t.dir==1?(oteFibZeroExtension=="Wick"?high>t.extreme:close>t.extreme):(oteFibZeroExtension=="Wick"?low<t.extreme:close<t.extreme)
                     if oteFibExtendPreTouch and not t.touched and exceedsZero
                         // First-touch priority; recalculate on confirmed candle using selected wick/close extension.
@@ -3587,23 +3582,23 @@ f_maintainFibArchive(array<OTEShadowRange> book) =>
 // Production OTE is a confluence qualifier for an existing native POI signal.
 // Range must already be confirmed, its FIRST touch observed on a live native POI,
 // and that first touch must be recent. Earlier retroactively touched ranges are ineligible.
-f_oteProductionHasPOI(array<OTEShadowRange> book,int dir,float top,float bottom,string engine,int poiId) =>
+f_oteProductionHasPOI(array<OTEShadowRange> book,int dir,float top,float bottom) =>
     bool found=false
     if array.size(book)>0
         for i=array.size(book)-1 to 0
             OTEShadowRange r=array.get(book,i)
-            if r.dir==dir and r.confirmedAt<bar_index and not na(r.lastConfluenceBar) and bar_index-r.lastConfluenceBar<=oteProductionTouchBars and r.lastConfluenceEngine==engine and r.lastConfluenceId==poiId and r.bandTop>bottom and r.bandBottom<top
+            if r.dir==dir and r.confirmedAt<bar_index and not na(r.lastConfluenceBar) and bar_index-r.lastConfluenceBar<=oteProductionTouchBars and r.bandTop>bottom and r.bandBottom<top
                 found:=true
                 break
     found
 
-f_oteProductionSource(int dir,float top,float bottom,string engine,int poiId) =>
+f_oteProductionSource(int dir,float top,float bottom) =>
     string result="NONE"
     if not na(top) and not na(bottom)
-        bool htf=(oteProductionScale=="HTF" or oteProductionScale=="Major + HTF" or oteProductionScale=="All") and oteHTFIsHigher and f_oteProductionHasPOI(oteFibHTFArchive,dir,top,bottom,engine,poiId)
-        bool maj=(oteProductionScale=="Major" or oteProductionScale=="Major + HTF" or oteProductionScale=="All") and f_oteProductionHasPOI(oteFibMajorArchive,dir,top,bottom,engine,poiId)
-        bool min=(oteProductionScale=="Minor" or oteProductionScale=="All") and f_oteProductionHasPOI(oteFibSwingArchive,dir,top,bottom,engine,poiId)
-        bool brk=oteProductionScale=="Structural Breaks" and f_oteProductionHasPOI(oteFibBreakArchive,dir,top,bottom,engine,poiId)
+        bool htf=(oteProductionScale=="HTF" or oteProductionScale=="Major + HTF" or oteProductionScale=="All") and oteHTFIsHigher and f_oteProductionHasPOI(oteFibHTFArchive,dir,top,bottom)
+        bool maj=(oteProductionScale=="Major" or oteProductionScale=="Major + HTF" or oteProductionScale=="All") and f_oteProductionHasPOI(oteFibMajorArchive,dir,top,bottom)
+        bool min=(oteProductionScale=="Minor" or oteProductionScale=="All") and f_oteProductionHasPOI(oteFibSwingArchive,dir,top,bottom)
+        bool brk=oteProductionScale=="Structural Breaks" and f_oteProductionHasPOI(oteFibBreakArchive,dir,top,bottom)
         result:=htf?"HTF":maj?"MAJ":min?"MIN":brk?"BRK":"NONE"
     result
 
@@ -3730,7 +3725,7 @@ if anySignal
     bool stopDistanceAccepted=not na(atr) and atr>0 and riskDistance<=atr*(maxStopDistanceATR)
     bool targetGeometryAccepted=riskDistance>0 and (primaryTargetMode=="Fixed R"?(fixedTarget2R>fixedTarget1R):(not na(maxT1AllowedR) and maxT1AllowedR>=minTarget1R and maxLiquidityTargetR>=minTarget2R))
     bool stopSideAccepted=dir==1?stopPrice<entryPrice:stopPrice>entryPrice
-    string oteMatch=oteProductionMode=="Off"?"NONE":f_oteProductionSource(dir,poiTop,poiBottom,poiEngine,poiId)
+    string oteMatch=oteProductionMode=="Off"?"NONE":f_oteProductionSource(dir,poiTop,poiBottom)
     bool oteAccepted=oteProductionMode!="Require" or oteMatch!="NONE"
     bool planAccepted=pidx>=0 and stopSideAccepted and stopDistanceAccepted and targetGeometryAccepted and oteAccepted
 
