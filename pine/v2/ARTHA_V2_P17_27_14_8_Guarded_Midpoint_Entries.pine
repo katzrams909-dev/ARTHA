@@ -3639,7 +3639,7 @@ if (showMidpointAudit or enableMidpointEntries) and barstate.isconfirmed and arr
                 array.set(midpointTouchBars,slot,bar_index)
         int age=slot>=0?bar_index-array.get(midpointTouchBars,slot):1000000
         bool reclaimed=age>=0 and age<=normalConfirmBars and f_normalReclaim(q.direction,q.top,q.bottom)
-        if reclaimed and not array.includes(midpointDoneKeys,k)
+        if reclaimed and (enableMidpointEntries or not markedThisBar) and not array.includes(midpointDoneKeys,k)
             array.push(midpointDoneKeys,k)
             if array.size(midpointDoneKeys)>120
                 array.shift(midpointDoneKeys)
