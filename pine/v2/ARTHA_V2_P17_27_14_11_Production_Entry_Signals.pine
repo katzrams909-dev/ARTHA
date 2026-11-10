@@ -346,7 +346,7 @@ string G143="14C Structural OTE Shadow"
 string oteProductionMode=input.string("Off","Production OTE confluence",options=["Off","Annotate","Require"],group=G143)
 string oteProductionScale=input.string("Major + HTF","Production OTE scale",options=["Minor","Major","HTF","Major + HTF","All","Structural Breaks"],group=G143)
 int oteProductionTouchBars=input.int(5,"Production OTE recent confluence window (bars)",minval=1,maxval=20,group=G143)
-bool oteShadowEnabled=input.bool(true,"Enable OTE shadow observations (no signals)",group=G143)
+bool oteShadowEnabled=input.bool(true,"Track confirmed structural-break OTE anchors",group=G143)
 bool enableIndependentOTE=input.bool(true,"Enable independent confirmed OTE entries",group=G143)
 bool oteRequireDSP=input.bool(true,"Require qualified displacement at structural break",group=G143)
 float oteMinRangeATR=input.float(1.0,"Minimum confirmed impulse range (ATR)",minval=0.1,maxval=15.0,step=0.5,group=G143)
