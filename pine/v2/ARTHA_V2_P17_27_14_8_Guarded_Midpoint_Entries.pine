@@ -3653,7 +3653,7 @@ if (showMidpointAudit or enableMidpointEntries) and barstate.isconfirmed and arr
                     array.push(midpointAuditLabels,lb)
                     if array.size(midpointAuditLabels)>25
                         label.delete(array.shift(midpointAuditLabels))
-        if reclaimed and enableMidpointEntries and not (bullREVSignal or bearREVSignal or bullCONTSignal or bearCONTSignal)
+        if reclaimed and enableMidpointEntries and not hasCurrentSignal
             string attempt=k+":"+str.tostring(array.get(midpointTouchBars,slot))
             if not array.includes(midpointAttemptKeys,attempt)
                 [ready,fam,score]=f_midpointPlanGate(q)
