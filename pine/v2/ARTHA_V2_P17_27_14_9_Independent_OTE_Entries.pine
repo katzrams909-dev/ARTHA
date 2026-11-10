@@ -3615,7 +3615,7 @@ f_midpointPlanGate(UnifiedPOI q,bool ote) =>
     string scope=fam=="REV"?(d==1?lastBullREVScope:lastBearREVScope):(d==1?lastBullCONTScope:lastBearCONTScope)
     int score=math.min(100,f_reactionQuality(q,fam,scope,fam=="REV"?"CHoCH":"BOS",15)+(ote?5:0))
     bool trendOK=not useTrendFilter or (d==1?trendBullAllowed:trendBearAllowed)
-    bool ok=q.primary and not na(q.episodeId) and aligned and (ote or revOK or contOK) and trendOK and score>=earlySignalMinScore and not f_signalDuplicate(fam,q.episodeId,q.sourceEngine,q.sourceId) and f_signalAdmissionOK(d,2,fam,q.episodeId,q.sourceEngine,q.sourceId)
+    bool ok=q.primary and not na(q.episodeId) and aligned and (ote or revOK or contOK) and trendOK and score>=(ote?(fam=="REV"?minREVSignalScore:minCONTSignalScore):earlySignalMinScore) and not f_signalDuplicate(fam,q.episodeId,q.sourceEngine,q.sourceId) and f_signalAdmissionOK(d,2,fam,q.episodeId,q.sourceEngine,q.sourceId)
     [ok,fam,score]
 
 // Latest already-confirmed OTE retest by scale; never use developing/past-hidden pivots.
@@ -3667,10 +3667,11 @@ if (showMidpointAudit or enableMidpointEntries or enableIndependentOTE) and bars
                     if array.size(midpointAuditLabels)>25
                         label.delete(array.shift(midpointAuditLabels))
         string oteScale=enableIndependentOTE and q.bornBar<bar_index?f_oteProductionSource(q.direction,q.top,q.bottom):"NONE"
-        bool oteReclaim=oteScale!="NONE" and f_normalReclaim(q.direction,q.top,q.bottom)
+        int oteStamp=oteScale!="NONE"?f_oteEntryTouchBar(oteScale,q.direction,q.top,q.bottom):na
+        bool oteReclaim=not na(oteStamp) and q.bornBar<oteStamp and f_normalReclaim(q.direction,q.top,q.bottom)
         if (oteReclaim or (reclaimed and enableMidpointEntries)) and not hasCurrentSignal and not (bullREVSignal or bearREVSignal or bullCONTSignal or bearCONTSignal)
             string src=oteReclaim?"OTE":"MID"
-            int touchBar=oteReclaim?f_oteEntryTouchBar(oteScale,q.direction,q.top,q.bottom):array.get(midpointTouchBars,slot)
+            int touchBar=oteReclaim?oteStamp:array.get(midpointTouchBars,slot)
             string attempt=src+"|"+k+"|"+str.tostring(touchBar)
             if not array.includes(midpointAttemptKeys,attempt)
                 [ready,fam,score]=f_midpointPlanGate(q,oteReclaim)
