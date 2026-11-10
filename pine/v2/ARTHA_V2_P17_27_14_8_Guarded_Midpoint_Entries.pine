@@ -4178,28 +4178,6 @@ if array.size(riskPlans)>0
             if not na(p.target4Line)
                 line.delete(p.target4Line)
                 p.target4Line:=na
-            if not na(p.entryTag)
-                label.delete(p.entryTag)
-                p.entryTag:=na
-            if not na(p.stopTag)
-                label.delete(p.stopTag)
-                p.stopTag:=na
-            if not na(p.target1Tag)
-                label.delete(p.target1Tag)
-                p.target1Tag:=na
-            if not na(p.target2Tag)
-                label.delete(p.target2Tag)
-                p.target2Tag:=na
-            if not na(p.target3Tag)
-                label.delete(p.target3Tag)
-                p.target3Tag:=na
-            if not na(p.target4Tag)
-                label.delete(p.target4Tag)
-                p.target4Tag:=na
-            if not na(p.statusTag)
-                label.delete(p.statusTag)
-                p.statusTag:=na
-
         array.set(riskPlans,n,p)
 
 // Retention cap applies to resolved plans only. Never silently drop active trades.
