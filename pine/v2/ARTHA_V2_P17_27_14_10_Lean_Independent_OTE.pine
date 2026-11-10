@@ -3544,24 +3544,23 @@ f_clearOTEAutoFib() =>
     while array.size(oteFibBoxes)>0
         box.delete(array.pop(oteFibBoxes))
 
-f_drawFibBatch(array<OTEShadowRange> source,int limit,bool major,bool dimMinor) =>
+f_drawFibBatch(array<OTEShadowRange> source,int limit) =>
     int total=array.size(source)
     if total>0 and limit>0
         for n=math.max(0,total-limit) to total-1
             OTEShadowRange r=array.get(source,n)
             color ink=r.dir==1?oteAutoFibBull:oteAutoFibBear
-            int fade=dimMinor?55:0
             float span=math.abs(r.extreme-r.origin)
             int right=bar_index+oteAutoFibRight
             if span>syminfo.mintick and r.born<=bar_index
                 if oteAutoFibZone
-                    box zone=box.new(r.born,r.bandTop,right,r.bandBottom,xloc=xloc.bar_index,bgcolor=color.new(ink,dimMinor?94:88),border_color=color.new(ink,dimMinor?85:62),extend=extend.none)
+                    box zone=box.new(r.born,r.bandTop,right,r.bandBottom,xloc=xloc.bar_index,bgcolor=color.new(ink,90),border_color=color.new(ink,70),extend=extend.none)
                     array.push(oteFibBoxes,zone)
                 for k=0 to 5
                     float fib=k==0?0.0:k==1?0.5:k==2?0.62:k==3?0.705:k==4?0.79:1.0
                     float level=r.extreme-r.dir*span*fib
                     bool keyLevel=k==3
-                    line l=line.new(r.born,level,right,level,xloc=xloc.bar_index,extend=extend.none,color=color.new(ink,keyLevel?fade:math.max(fade,35)),width=keyLevel and major?2:1,style=keyLevel?line.style_solid:line.style_dotted)
+                    line l=line.new(r.born,level,right,level,xloc=xloc.bar_index,extend=extend.none,color=color.new(ink,keyLevel?0:35),width=keyLevel?2:1,style=keyLevel?line.style_solid:line.style_dotted)
                     array.push(oteFibLines,l)
 
 f_drawOTEAutoFib() =>
@@ -3569,7 +3568,7 @@ f_drawOTEAutoFib() =>
     if oteAutoFibShow
         int limit=oteAutoFibMode=="Latest"?1:oteAutoFibHistory
         if oteAutoFibSource=="Structural Breaks"
-            f_drawFibBatch(oteFibBreakArchive,limit,true,false)
+            f_drawFibBatch(oteFibBreakArchive,limit)
         else
             bool showMinor=oteFibScale=="Minor" or oteFibScale=="Both" or oteFibScale=="All"
             bool showMajor=oteFibScale=="Major" or oteFibScale=="Both" or oteFibScale=="Major + HTF" or oteFibScale=="All"
@@ -3577,11 +3576,11 @@ f_drawOTEAutoFib() =>
             int count=(showMinor?1:0)+(showMajor?1:0)+(showHTF?1:0)
             int perScale=count>1 and oteAutoFibMode=="Historical"?math.max(1,int(math.ceil(limit/count))):limit
             if showMinor
-                f_drawFibBatch(oteFibSwingArchive,perScale,false,count>1)
+                f_drawFibBatch(oteFibSwingArchive,perScale)
             if showMajor
-                f_drawFibBatch(oteFibMajorArchive,perScale,true,false)
+                f_drawFibBatch(oteFibMajorArchive,perScale)
             if showHTF and oteHTFIsHigher
-                f_drawFibBatch(oteFibHTFArchive,perScale,true,false)
+                f_drawFibBatch(oteFibHTFArchive,perScale)
 
 // Keep OTE range updates and Auto Fib drawing isolated from the main body.
 f_updateOTEShadow()
