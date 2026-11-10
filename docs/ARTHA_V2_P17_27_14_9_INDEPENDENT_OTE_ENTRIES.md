@@ -13,7 +13,7 @@ A candidate may be admitted only on its confirmed current candle when:
 4. Structural direction has at least internal/external trend alignment and passes the optional existing combined trend filter. Recent REV/CONT context strengthens family assignment but is no longer mandatory for OTE-originated signals.
 5. Existing `f_reactionQuality` score (+5 for confirmed OTE confluence) meets the existing REV or CONT minimum quality threshold (depending on family), and accepted-key duplication/cooldown rules allow the selected native POI.
 
-Priorities: Native NORMAL/EARLY/MISS wins when a native signal is present on the candle. When no native signal is present, independently confirmed OTE has priority over experimental MID when both are enabled and qualify. A one-per-source-POI-per-confirmed-OTE-retest-bar attempt key prevents duplicate retries from one touch; a genuinely new retest may retry after a previous risk rejection. Separately accepted setups can coexist.
+Priorities: Native NORMAL/EARLY/MISS wins when a native signal is present on the candle. When no native signal is present, the POI loop chooses the first qualified eligible record. **For the same POI**, OTE classification takes precedence over MID when both qualify; cross-POI OTE-vs-MID priority is not globally arbitrated in this version. A one-per-source-POI-per-confirmed-OTE-retest-bar attempt key prevents duplicate retries from one touch; a genuinely new retest may retry after a previous risk rejection. Separately accepted setups can coexist.
 
 ## Risk and output
 A qualifying OTE candidate is labeled `OTE`, bound to selected same-direction native POI source and ID, and passed through the **unchanged** shared native risk/target engine:
