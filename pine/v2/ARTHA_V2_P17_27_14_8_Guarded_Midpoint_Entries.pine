@@ -3638,19 +3638,20 @@ if (showMidpointAudit or enableMidpointEntries) and barstate.isconfirmed and arr
                 array.set(midpointTouchBars,slot,bar_index)
         int age=slot>=0?bar_index-array.get(midpointTouchBars,slot):1000000
         bool reclaimed=age>=0 and age<=normalConfirmBars and f_normalReclaim(q.direction,q.top,q.bottom)
-        if reclaimed and not markedThisBar and not array.includes(midpointDoneKeys,k)
-            markedThisBar:=true
+        if reclaimed and not array.includes(midpointDoneKeys,k)
             array.push(midpointDoneKeys,k)
-            midpointAuditCount+=1
             if array.size(midpointDoneKeys)>120
                 array.shift(midpointDoneKeys)
-            if showMidpointAudit
-                string fib=f_oteProductionSource(q.direction,q.top,q.bottom)
-                string msg="POI 50% · "+q.poiType+"#"+str.tostring(q.sourceId)+" · "+str.tostring(age)+"b"+(fib=="NONE"?"":" · OTE "+fib)
-                label lb=label.new(bar_index,q.direction==1?low:high,msg,style=q.direction==1?label.style_label_up:label.style_label_down,color=color.new(color.orange,45),textcolor=color.white,size=size.tiny)
-                array.push(midpointAuditLabels,lb)
-                if array.size(midpointAuditLabels)>25
-                    label.delete(array.shift(midpointAuditLabels))
+            if not markedThisBar
+                markedThisBar:=true
+                midpointAuditCount+=1
+                if showMidpointAudit
+                    string fib=f_oteProductionSource(q.direction,q.top,q.bottom)
+                    string msg="POI 50% · "+q.poiType+"#"+str.tostring(q.sourceId)+" · "+str.tostring(age)+"b"+(fib=="NONE"?"":" · OTE "+fib)
+                    label lb=label.new(bar_index,q.direction==1?low:high,msg,style=q.direction==1?label.style_label_up:label.style_label_down,color=color.new(color.orange,45),textcolor=color.white,size=size.tiny)
+                    array.push(midpointAuditLabels,lb)
+                    if array.size(midpointAuditLabels)>25
+                        label.delete(array.shift(midpointAuditLabels))
             if enableMidpointEntries and not (bullREVSignal or bearREVSignal or bullCONTSignal or bearCONTSignal)
                 [ready,fam,score]=f_midpointPlanGate(q)
                 if ready
