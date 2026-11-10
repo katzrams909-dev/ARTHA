@@ -3608,6 +3608,7 @@ var array<int> midpointTouchBars=array.new_int()
 var array<string> midpointDoneKeys=array.new_string()
 var int midpointAuditCount=0
 if showMidpointAudit and barstate.isconfirmed and array.size(unifiedPOIs)>0
+    bool markedThisBar=false
     for i=0 to array.size(unifiedPOIs)-1
         UnifiedPOI q=array.get(unifiedPOIs,i)
         string k=q.sourceEngine+"#"+str.tostring(q.sourceId)+"/"+str.tostring(q.direction)
@@ -3622,18 +3623,18 @@ if showMidpointAudit and barstate.isconfirmed and array.size(unifiedPOIs)>0
                 array.set(midpointTouchBars,slot,bar_index)
         int age=slot>=0?bar_index-array.get(midpointTouchBars,slot):1000000
         bool reclaimed=age>=0 and age<=normalConfirmBars and f_normalReclaim(q.direction,q.top,q.bottom)
-        if reclaimed and not array.includes(midpointDoneKeys,k)
+        if reclaimed and not markedThisBar and not array.includes(midpointDoneKeys,k)
             string fib=f_oteProductionSource(q.direction,q.top,q.bottom)
             string msg="POI 50% · "+q.poiType+"#"+str.tostring(q.sourceId)+" · "+str.tostring(age)+"b"+(fib=="NONE"?"":" · OTE "+fib)
             label lb=label.new(bar_index,q.direction==1?low:high,msg,style=q.direction==1?label.style_label_up:label.style_label_down,color=color.new(color.orange,45),textcolor=color.white,size=size.tiny)
             array.push(midpointAuditLabels,lb)
             array.push(midpointDoneKeys,k)
             midpointAuditCount+=1
+            markedThisBar:=true
             if array.size(midpointAuditLabels)>25
                 label.delete(array.shift(midpointAuditLabels))
             if array.size(midpointDoneKeys)>120
                 array.shift(midpointDoneKeys)
-            break
     if array.size(midpointAuditKeys)>120
         array.shift(midpointAuditKeys)
         array.shift(midpointTouchBars)
