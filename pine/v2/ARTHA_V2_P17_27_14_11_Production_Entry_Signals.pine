@@ -3875,6 +3875,7 @@ if anySignal
         // Keep one accepted-entry marker anchored to its actual signal candle.
         // Remove it from the transient candidate pool so old trades cannot be pruned.
         if not na(planSignalMarker)
+            label.set_y(planSignalMarker,entryPrice)
             int unifiedMarkerIndex=array.indexof(signalLabels,planSignalMarker)
             if unifiedMarkerIndex>=0
                 array.remove(signalLabels,unifiedMarkerIndex)
