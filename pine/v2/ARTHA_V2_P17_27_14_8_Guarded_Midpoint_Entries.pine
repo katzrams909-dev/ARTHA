@@ -3672,14 +3672,9 @@ if (showMidpointAudit or enableMidpointEntries) and barstate.isconfirmed and arr
                     reactionScore:=score
                     reactionGrade:=f_qualityGrade(score)
                     reactionSweepPrice:=na
-                    selectedDirection:=q.direction
-                    selectedFamily:=fam
                     selectedSource:="MID"
-                    selectedEpisodeId:=q.episodeId
                     selectedPOIEngine:=q.sourceEngine
                     selectedPOIId:=q.sourceId
-                    selectedScore:=score
-                    selectedSignalValid:=true
                     if q.direction==1
                         bullSignalCount+=1
                         if fam=="REV"
