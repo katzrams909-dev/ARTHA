@@ -3621,6 +3621,7 @@ var array<label> midpointAuditLabels=array.new_label()
 var array<string> midpointAuditKeys=array.new_string()
 var array<int> midpointTouchBars=array.new_int()
 var array<string> midpointDoneKeys=array.new_string()
+var array<string> midpointAttemptKeys=array.new_string()
 var int midpointAuditCount=0
 if (showMidpointAudit or enableMidpointEntries) and barstate.isconfirmed and array.size(unifiedPOIs)>0
     bool markedThisBar=false
@@ -3652,9 +3653,14 @@ if (showMidpointAudit or enableMidpointEntries) and barstate.isconfirmed and arr
                     array.push(midpointAuditLabels,lb)
                     if array.size(midpointAuditLabels)>25
                         label.delete(array.shift(midpointAuditLabels))
-            if enableMidpointEntries and not (bullREVSignal or bearREVSignal or bullCONTSignal or bearCONTSignal)
+        if reclaimed and enableMidpointEntries and not (bullREVSignal or bearREVSignal or bullCONTSignal or bearCONTSignal)
+            string attempt=k+":"+str.tostring(array.get(midpointTouchBars,slot))
+            if not array.includes(midpointAttemptKeys,attempt)
                 [ready,fam,score]=f_midpointPlanGate(q)
                 if ready
+                    array.push(midpointAttemptKeys,attempt)
+                    if array.size(midpointAttemptKeys)>120
+                        array.shift(midpointAttemptKeys)
                     reactionSignalEvent:=true
                     reactionFamily:=fam
                     reactionKind:="MID"
