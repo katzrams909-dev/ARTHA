@@ -3303,7 +3303,7 @@ if hasCurrentSignal
 
 //=============================================================================
 // Confirmed POI mitigation entries use only native structure and POI context.
-// Optional MID and independently sourced OTE entries share quality and structural-risk admission.
+// Confirmed mitigation entries reuse native structural-quality and risk admission.
 f_midpointPlanGate(UnifiedPOI q) =>
     int d=q.direction
     int r=d==1?lastBullREVContextBar:lastBearREVContextBar
