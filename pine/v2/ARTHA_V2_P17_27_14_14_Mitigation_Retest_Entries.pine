@@ -3107,7 +3107,7 @@ if not na(bullRxPOIId)
         bullRxTop:=live.top
         bullRxBottom:=live.bottom
     bool timingOK=bar_index<=bullRxDeadline and (bullRxKind=="MISSED"?(auditAllowSameBar or bar_index>bullRxStart):(bar_index-bullRxStart>=earlyMinBarsAfterTouch))
-    bool confirmed=stillValid and timingOK and barstate.isconfirmed and (bullRxKind=="MISSED"?f_auditCloseConfirmed(1,bullRxTop,bullRxBottom,bullRxClass):f_earlyTouchClose(1,bullRxTop,bullRxBottom))
+    bool confirmed=stillValid and timingOK and barstate.isconfirmed and (bullRxKind=="MISSED"?f_auditCloseConfirmed(1,bullRxTop,bullRxBottom,bullRxClass):(f_earlyTouchClose(1,bullRxTop,bullRxBottom) or f_normalReclaim(1,bullRxTop,bullRxBottom)))
     if confirmed
         UnifiedPOI p=array.get(unifiedPOIs,liveIdx)
         bool isMiss=bullRxKind=="MISSED"
@@ -3152,7 +3152,7 @@ if not na(bearRxPOIId)
         bearRxTop:=live.top
         bearRxBottom:=live.bottom
     bool timingOK=bar_index<=bearRxDeadline and (bearRxKind=="MISSED"?(auditAllowSameBar or bar_index>bearRxStart):(bar_index-bearRxStart>=earlyMinBarsAfterTouch))
-    bool confirmed=stillValid and timingOK and barstate.isconfirmed and (bearRxKind=="MISSED"?f_auditCloseConfirmed(-1,bearRxTop,bearRxBottom,bearRxClass):f_earlyTouchClose(-1,bearRxTop,bearRxBottom))
+    bool confirmed=stillValid and timingOK and barstate.isconfirmed and (bearRxKind=="MISSED"?f_auditCloseConfirmed(-1,bearRxTop,bearRxBottom,bearRxClass):(f_earlyTouchClose(-1,bearRxTop,bearRxBottom) or f_normalReclaim(-1,bearRxTop,bearRxBottom)))
     if confirmed
         UnifiedPOI p=array.get(unifiedPOIs,liveIdx)
         bool isMiss=bearRxKind=="MISSED"
@@ -3903,7 +3903,7 @@ if anySignal
         if not na(planSignalMarker)
             label.set_y(planSignalMarker,entryPrice)
             label.set_text(planSignalMarker,compactEntry)
-            label.set_tooltip(planSignalMarker,entryDetail)
+            label.set_tooltip(planSignalMarker,entryDetail+(signalSource=="MID" or signalSource=="MIT"?"\nMITIGATION "+mitigationRequiredFill+" · "+mitigationConfirmMode:""))
             label.set_size(planSignalMarker,size.tiny)
             label.set_style(planSignalMarker,dir==1?label.style_label_up:label.style_label_down)
             int unifiedMarkerIndex=array.indexof(signalLabels,planSignalMarker)
